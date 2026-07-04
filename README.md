@@ -16,7 +16,7 @@ ClaudeDesktopPlusPlus 是面向 Claude Desktop 的外部增强启动器和管理
 从 GitHub Releases 下载最新版安装包：
 
 - Windows：`Claude++_*-x64-setup.exe`
-- macOS：规划中，当前仓库保留 macOS 探测和启动路线，发布包会在验证后开放
+- macOS：`Claude++_*.dmg` 或 GitHub Actions 自动打包出的 macOS 产物
 
 安装后启动 `Claude++`，默认进入中文控制台。常用流程：
 
@@ -203,6 +203,15 @@ npm run dev
 cd apps/desktop
 npm run bundle
 ```
+
+发布流程：
+
+```powershell
+git tag v0.1.41
+git push origin v0.1.41
+```
+
+GitHub Actions 会在 tag 推送后自动构建 Windows 和 macOS Release 产物。
 
 主要结构：
 
