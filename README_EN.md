@@ -98,6 +98,7 @@ npm run bundle
 
 - Releases: <https://github.com/2270525352/ClaudeDesktopPlusPlus/releases>
 - Issues: <https://github.com/2270525352/ClaudeDesktopPlusPlus/issues>
+- Email: <a href="mailto:2270525352@qq.com">2270525352@qq.com</a>
 - Codex++: <https://github.com/BigPizzaV3/CodexPlusPlus>
 
 ## License

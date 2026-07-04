@@ -70,7 +70,7 @@ ClaudeDesktopPlusPlus 是面向 Claude Desktop 的外部增强启动器和管理
   </tr>
 </table>
 
-想显示在上方？欢迎通过 [GitHub Issues](https://github.com/2270525352/ClaudeDesktopPlusPlus/issues) 联系项目维护者。
+想显示在上方？欢迎通过邮箱联系项目维护者：<a href="mailto:2270525352@qq.com">2270525352@qq.com</a>。
 
 ## 交流与支持
 
@@ -79,6 +79,7 @@ ClaudeDesktopPlusPlus 是面向 Claude Desktop 的外部增强启动器和管理
 - GitHub Issues：<https://github.com/2270525352/ClaudeDesktopPlusPlus/issues>
 - GitHub Releases：<https://github.com/2270525352/ClaudeDesktopPlusPlus/releases>
 - GitHub Discussions：<https://github.com/2270525352/ClaudeDesktopPlusPlus/discussions>
+- 邮箱：<a href="mailto:2270525352@qq.com">2270525352@qq.com</a>
 - QQ 群：待开放
 - 微信群：待开放
 
