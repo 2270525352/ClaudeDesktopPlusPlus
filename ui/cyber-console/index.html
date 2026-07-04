@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Claude++ Control Tower</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <canvas id="matrixRain" aria-hidden="true"></canvas>
+    <div class="scanline" aria-hidden="true"></div>
+    <div class="noise" aria-hidden="true"></div>
+
+    <main class="app-shell" aria-label="Claude++ 控制台">
+      <aside class="sidebar">
+        <section class="brand-block">
+          <div class="sigil" aria-hidden="true">C++</div>
+          <div>
+            <h1>Claude++</h1>
+            <p data-i18n="tagline">桌面增强控制塔</p>
+          </div>
+        </section>
+
+        <nav class="nav-list" aria-label="主导航">
+          <button class="nav-item active" type="button" data-page="overview" data-i18n="navOverview">总览</button>
+          <button class="nav-item" type="button" data-page="system" data-i18n="navSystem">系统就绪</button>
+          <button class="nav-item" type="button" data-page="capabilities" data-i18n="navCapabilities">内置能力</button>
+          <button class="nav-item" type="button" data-page="tools" data-i18n="navTools">能力插件</button>
+          <button class="nav-item" type="button" data-page="providers" data-i18n="navProviders">API 配置</button>
+          <button class="nav-item" type="button" data-page="recommendations" data-i18n="navRecommendations">推荐</button>
+          <button class="nav-item" type="button" data-page="history" data-i18n="navHistory">历史修复</button>
+          <button class="nav-item" type="button" data-page="sandbox" data-i18n="navSandbox">安全策略</button>
+          <button class="nav-item" type="button" data-page="about" data-i18n="navAbout">关于</button>
+          <button class="nav-item" type="button" data-page="logs" data-i18n="navLogs">运行日志</button>
+        </nav>
+
+        <section class="sidebar-foot">
+          <div class="language-switch" aria-label="语言切换">
+            <button class="lang-button active" type="button" data-locale="zh" aria-pressed="true">中文</button>
+            <button class="lang-button" type="button" data-locale="en" aria-pressed="false">EN</button>
+          </div>
+          <button id="fxToggle" class="lang-button" type="button" aria-pressed="false"></button>
+          <p id="bridgeState" class="bridge-state">桌面桥检测中</p>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" data-i18n="systemNode">SYSTEM NODE 07</p>
+            <h2 id="pageTitle" data-i18n="overviewTitle">控制总览</h2>
+          </div>
+          <div class="topbar-actions">
+            <div class="connection-switch" aria-label="3P 连接模式">
+              <span class="connection-mode-label" data-i18n="connectionMode">连接模式</span>
+              <button id="directModeButton" class="mode-button" type="button" data-action="setDirectMode" data-i18n="directModeButton">直连</button>
+              <button id="gatewayModeButton" class="mode-button" type="button" data-action="setGatewayMode" data-i18n="gatewayModeButton">Gateway</button>
+            </div>
+            <button class="text-button" type="button" data-action="refreshState" data-i18n="refresh">刷新状态</button>
+            <button class="text-button" type="button" data-action="enableChineseLocalization" data-i18n="enableChineseLocalization">一键启用汉化</button>
+            <button class="text-button primary" type="button" data-action="launchClaudeInjected" data-i18n="launchClaudeInjected">启动 Claude Desktop</button>
+          </div>
+        </header>
+        <div id="noticeBar" class="notice-bar" role="status" aria-live="polite" hidden></div>
+
+        <section class="page active" data-view="overview">
+          <section class="status-grid">
+            <article class="status-card">
+              <span class="led green"></span>
+              <p data-i18n="installStatus">Claude 安装</p>
+              <strong id="installSummary">扫描中</strong>
+            </article>
+            <article class="status-card">
+              <span class="led cyan"></span>
+              <p data-i18n="ccSwitchStatus">cc-switch 同步</p>
+              <strong id="ccSwitchSummary">扫描中</strong>
+            </article>
+            <article class="status-card">
+              <span class="led violet"></span>
+              <p data-i18n="activeProvider">当前 API</p>
+              <strong id="providerSummary">未配置</strong>
+            </article>
+            <article class="status-card">
+              <span class="led amber"></span>
+              <p data-i18n="sandboxStatus">沙盒策略</p>
+              <strong id="sandboxSummary">默认</strong>
+            </article>
+            <article class="status-card">
+              <span class="led cyan"></span>
+              <p data-i18n="gatewayStatus">Gateway 网关</p>
+              <strong id="gatewaySummary">扫描中</strong>
+            </article>
+          </section>
+
+          <section class="overview-callout" role="note">
+            <p class="eyebrow" data-i18n="directCompatibilityTitle">直连兼容提醒</p>
+            <p data-i18n="directCompatibilityHint">
+              配置 Codex / OpenAI 类型协议并使用直连时，需要第三方平台提前做好 Claude 模型映射和 Anthropic /v1/messages 兼容；否则请使用 Gateway 模式。
+            </p>
+          </section>
+
+          <section class="panel split-panel">
+            <div>
+              <p class="eyebrow" data-i18n="quickActions">快捷操作</p>
+              <h3 data-i18n="nextSteps">下一步</h3>
+            </div>
+            <div class="action-stack">
+              <button class="text-button primary" type="button" data-action="syncCcSwitch" data-i18n="syncCcSwitch">同步 cc-switch 配置</button>
+            </div>
+          </section>
+        </section>
+
+        <section class="page" data-view="system">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">SYSTEM READINESS</p>
+                <h3 data-i18n="systemReadyTitle">系统就绪检查</h3>
+              </div>
+              <button class="text-button" type="button" data-action="refreshState" data-i18n="refresh">刷新状态</button>
+            </div>
+            <dl class="detail-list compact">
+              <div><dt data-i18n="windowsStatus">Windows 版本</dt><dd id="windowsStatus">-</dd></div>
+              <div><dt data-i18n="adminStatus">管理员权限</dt><dd id="adminStatus">-</dd></div>
+              <div><dt data-i18n="firmwareVirtualization">固件虚拟化</dt><dd id="firmwareVirtualization">-</dd></div>
+              <div><dt data-i18n="hypervisorLaunchType">Hypervisor 启动项</dt><dd id="hypervisorLaunchType">-</dd></div>
+              <div><dt data-i18n="hypervisorRuntime">Hypervisor 运行</dt><dd id="hypervisorRuntime">-</dd></div>
+              <div><dt data-i18n="modernInstallStatus">Modern Installer</dt><dd id="modernInstallStatus">-</dd></div>
+              <div><dt data-i18n="appxPackage">Appx 包</dt><dd id="appxPackage">-</dd></div>
+              <div><dt data-i18n="vmpStatus">Virtual Machine Platform</dt><dd id="vmpStatus">-</dd></div>
+              <div><dt data-i18n="hypervisorStatus">Hypervisor Platform</dt><dd id="hypervisorStatus">-</dd></div>
+              <div><dt data-i18n="rebootStatus">重启需求</dt><dd id="rebootStatus">-</dd></div>
+            </dl>
+            <div class="button-row system-actions">
+              <button class="text-button" type="button" data-action="relaunchAsAdmin" data-i18n="relaunchAsAdmin">以管理员重新打开</button>
+              <button class="text-button primary" type="button" data-action="installClaudeModern" data-i18n="installClaudeModern">一键安装 Claude Desktop</button>
+              <button class="text-button" type="button" data-action="enableVmp" data-i18n="enableVmp">一键启用 VMP</button>
+            </div>
+            <p class="warning-copy" data-i18n="systemReadyHint">
+              Cowork 在 Windows 上需要 Claude Desktop modern installer 和 Virtual Machine Platform。启用系统功能后通常需要重启。
+            </p>
+            <div id="systemActionLog" class="evidence-log"></div>
+          </section>
+        </section>
+
+        <section class="page" data-view="capabilities">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">OFFICIAL CAPABILITIES</p>
+                <h3 data-i18n="capabilitiesTitle">Claude Desktop 内置能力中心</h3>
+              </div>
+              <div class="button-row">
+                <button class="text-button primary" type="button" data-action="enableDeveloperCapabilities" data-i18n="enableDeveloperCapabilities">一键启用内置能力</button>
+                <button class="text-button" type="button" data-action="refreshCapabilities" data-i18n="refresh">刷新状态</button>
+              </div>
+            </div>
+            <dl class="detail-list compact">
+              <div><dt data-i18n="capabilityBrowserMcp">浏览器控制能力</dt><dd id="capabilityBrowserMcp">-</dd></div>
+              <div><dt data-i18n="capabilityWorkspaceMcp">工作区文件能力</dt><dd id="capabilityWorkspaceMcp">-</dd></div>
+              <div><dt data-i18n="capabilityNpx">插件运行时</dt><dd id="capabilityNpx">-</dd></div>
+              <div><dt data-i18n="capabilityWorkspace">默认工作区</dt><dd id="capabilityWorkspace">-</dd></div>
+            </dl>
+            <div class="button-row capability-actions">
+              <button class="text-button primary" type="button" data-action="launchClaudeInjected" data-i18n="launchClaudeInjected">启动 Claude Desktop</button>
+              <button class="text-button" type="button" data-action="openExternalUrl" data-url="https://chromewebstore.google.com/" data-i18n="openChromeConnector">打开 Chrome 连接器</button>
+              <button class="text-button" type="button" data-action="openExternalUrl" data-url="https://support.claude.com/en/articles/11175166-getting-started-with-claude-for-chrome" data-i18n="openChromeGuide">Chrome 控制指南</button>
+            </div>
+            <p class="warning-copy" data-i18n="capabilitiesHint">
+              按 Claude Desktop 官方开发者模式写入能力配置，启用浏览器控制、工作区文件访问和插件运行入口；重启 Claude Desktop 后生效。
+            </p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">CONFIG TARGETS</p>
+                <h3 data-i18n="capabilityConfigTargets">能力安装位置</h3>
+              </div>
+            </div>
+            <div id="capabilityConfigList" class="provider-list"></div>
+            <div id="capabilityActionLog" class="evidence-log"></div>
+          </section>
+        </section>
+
+        <section class="page" data-view="launch">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">CLAUDE DESKTOP</p>
+                <h3 data-i18n="launchTitle">启动诊断</h3>
+              </div>
+              <div class="button-row">
+                <button class="text-button primary" type="button" data-action="launchClaudeInjected" data-i18n="launchClaudeInjected">启动 Claude Desktop</button>
+                <button class="text-button" type="button" data-action="launchClaudeClean" data-i18n="launchClaudeClean">诊断启动</button>
+              </div>
+            </div>
+            <dl class="detail-list">
+              <div><dt data-i18n="launcherRoute">启动方式</dt><dd id="launcherRoute">-</dd></div>
+              <div><dt data-i18n="injectionChannel">配置方式</dt><dd id="injectionChannel">-</dd></div>
+              <div><dt data-i18n="liveInjection">实时脚本</dt><dd id="liveInjection">-</dd></div>
+              <div><dt data-i18n="installPath">安装路径</dt><dd id="installPath">-</dd></div>
+              <div><dt data-i18n="workingDir">工作目录</dt><dd id="workingDir">-</dd></div>
+              <div><dt>app.asar</dt><dd id="asarPath">-</dd></div>
+              <div><dt data-i18n="launchPolicy">启动策略</dt><dd id="launchPolicy">默认按当前 API 配置启动</dd></div>
+            </dl>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">3P GATEWAY EVIDENCE</p>
+                <h3 data-i18n="verificationTitle">启动验证</h3>
+              </div>
+              <span id="verificationBadge" class="seal" data-i18n="verificationWaiting">等待启动</span>
+            </div>
+            <dl class="detail-list compact">
+              <div><dt data-i18n="verificationVerdict">验证结论</dt><dd id="verificationVerdict">-</dd></div>
+              <div><dt data-i18n="gatewayRequests">网关请求</dt><dd id="gatewayRequests">0</dd></div>
+              <div><dt data-i18n="gatewayForwarded">转发成功</dt><dd id="gatewayForwarded">0</dd></div>
+              <div><dt data-i18n="gatewayLastRequest">最近请求</dt><dd id="gatewayLastRequest">-</dd></div>
+              <div><dt data-i18n="gatewayUpstreamStatus">上游状态</dt><dd id="gatewayUpstreamStatus">-</dd></div>
+              <div><dt data-i18n="gatewayUpstreamError">上游错误</dt><dd id="gatewayUpstreamError">-</dd></div>
+              <div><dt data-i18n="claude3pApplied">3P 配置状态</dt><dd id="claude3pApplied">-</dd></div>
+              <div><dt data-i18n="claude3pDeployment">Deployment Mode</dt><dd id="claude3pDeploymentMode">-</dd></div>
+              <div><dt data-i18n="claude3pAppliedId">Applied ID</dt><dd id="claude3pAppliedId">-</dd></div>
+              <div><dt data-i18n="claude3pDesktopConfig">桌面配置</dt><dd id="claude3pDesktopConfig">-</dd></div>
+              <div><dt data-i18n="claude3pMetaPath">配置索引</dt><dd id="claude3pMetaPath">-</dd></div>
+              <div><dt data-i18n="claude3pConfigPath">Gateway 配置</dt><dd id="claude3pConfigPath">-</dd></div>
+            </dl>
+            <div id="verificationLogs" class="evidence-log"></div>
+          </section>
+        </section>
+
+        <section class="page" data-view="tools">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">LOCALIZATION PLUGIN</p>
+                <h3 data-i18n="localizationTitle">一键汉化</h3>
+              </div>
+              <span id="localizationBadge" class="seal" data-i18n="localizationNotInstalled">未安装</span>
+            </div>
+            <dl class="detail-list compact">
+              <div><dt data-i18n="localizationStatus">汉化状态</dt><dd id="localizationStatus">-</dd></div>
+              <div><dt data-i18n="localizationRuntime">生效通道</dt><dd id="localizationRuntime">-</dd></div>
+            </dl>
+            <div class="button-row">
+              <button class="text-button primary" type="button" data-action="enableChineseLocalization" data-i18n="enableChineseLocalization">一键启用汉化</button>
+              <button class="text-button" type="button" data-action="disableChineseLocalization" data-i18n="disableChineseLocalization">停用汉化</button>
+            </div>
+            <p class="warning-copy" data-i18n="localizationHint">
+              安装 zh-CN 语言资源并写入 Claude locale；不修改 app.asar。
+            </p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">OFFICIAL PLUGINS</p>
+                <h3 data-i18n="officialPluginsTitle">官方插件市场</h3>
+              </div>
+              <div class="button-row">
+                <button class="text-button primary" type="button" data-action="syncOfficialPlugins" data-i18n="officialPluginsSync">同步官方目录</button>
+                <button class="text-button" type="button" data-action="refreshOfficialPlugins" data-i18n="refresh">刷新状态</button>
+              </div>
+            </div>
+            <dl class="detail-list compact">
+              <div><dt data-i18n="officialPluginsCli">Claude CLI</dt><dd id="officialPluginsCli">-</dd></div>
+              <div><dt data-i18n="officialPluginsMarketplace">官方目录</dt><dd id="officialPluginsMarketplace">-</dd></div>
+              <div><dt data-i18n="officialPluginsCount">插件数量</dt><dd id="officialPluginsCount">-</dd></div>
+              <div><dt data-i18n="officialPluginsLastUpdated">最近同步</dt><dd id="officialPluginsLastUpdated">-</dd></div>
+            </dl>
+            <div class="plugin-marketplace-toolbar">
+              <label>
+                <span data-i18n="officialPluginsSearch">搜索插件</span>
+                <input id="officialPluginSearch" type="search" data-i18n-placeholder="officialPluginsSearchPlaceholder" placeholder="搜索名称、分类、作者或说明" autocomplete="off" />
+              </label>
+              <span id="officialPluginVisibleCount" class="bridge-state">-</span>
+            </div>
+            <div id="officialPluginList" class="provider-list plugin-marketplace-list"></div>
+            <div class="button-row plugin-marketplace-more">
+              <button id="officialPluginLoadMore" class="text-button" type="button" data-action="loadMoreOfficialPlugins" data-i18n="officialPluginsLoadMore">加载更多</button>
+            </div>
+            <p class="warning-copy" data-i18n="officialPluginsHint">
+              使用 Claude 官方插件市场和 CLI 安装本地插件。组织后台的插件列表仍由 Claude 账号/组织策略决定。
+            </p>
+            <div id="officialPluginActionLog" class="evidence-log"></div>
+          </section>
+        </section>
+
+        <section class="page" data-view="providers">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">CC-SWITCH</p>
+                <h3 data-i18n="ccSwitchImport">同步已有配置</h3>
+              </div>
+              <button class="text-button primary" type="button" data-action="syncCcSwitch" data-i18n="syncCcSwitch">同步 cc-switch 配置</button>
+            </div>
+            <dl class="detail-list compact">
+              <div><dt data-i18n="ccSwitchRoot">配置目录</dt><dd id="ccSwitchRoot">-</dd></div>
+              <div><dt data-i18n="ccSwitchDb">数据库</dt><dd id="ccSwitchDb">-</dd></div>
+              <div><dt data-i18n="ccSwitchProviders">可同步配置</dt><dd id="ccSwitchProviders">0</dd></div>
+            </dl>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">API PROVIDERS</p>
+                <h3 data-i18n="providerList">第三方 API</h3>
+              </div>
+            </div>
+            <div id="providerList" class="provider-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">CREDENTIAL PROBE</p>
+                <h3 data-i18n="providerTestTitle">凭据测试</h3>
+              </div>
+              <button class="text-button" type="button" data-action="testActiveProvider" data-i18n="testActiveProvider">测试当前 API</button>
+            </div>
+            <dl class="detail-list compact">
+              <div><dt data-i18n="providerTestTarget">测试目标</dt><dd id="providerTestTarget">-</dd></div>
+              <div><dt data-i18n="providerTestStatus">HTTP 状态</dt><dd id="providerTestStatus">-</dd></div>
+              <div><dt data-i18n="providerTestCode">错误码</dt><dd id="providerTestCode">-</dd></div>
+              <div><dt data-i18n="providerTestMessage">错误说明</dt><dd id="providerTestMessage">-</dd></div>
+              <div><dt data-i18n="providerTestBody">响应摘要</dt><dd id="providerTestBody">-</dd></div>
+            </dl>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">MANUAL CONFIG</p>
+                <h3 id="providerFormTitle" data-i18n="manualProvider">手动添加</h3>
+              </div>
+              <button class="text-button primary" type="button" data-action="openProviderModal" data-i18n="addProvider">添加 API</button>
+            </div>
+            <p class="bridge-state" data-i18n="providerFormHint">保存后会设为当前 API；编辑已有配置时，Key 留空会保留原 Key。</p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">AI QUICK CONFIG</p>
+                <h3 data-i18n="quickProviderTitle">AI 快捷配置</h3>
+              </div>
+            </div>
+            <div id="providerPresetList" class="recommendation-grid"></div>
+          </section>
+        </section>
+
+        <section class="page" data-view="recommendations">
+          <section class="panel sponsor-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">SPONSOR SLOT</p>
+                <h3 data-i18n="recommendationsTitle">独家赞助商</h3>
+              </div>
+              <span class="seal ok" data-i18n="sponsorBadge">OFFICIAL RELAY</span>
+            </div>
+            <article class="sponsor-card">
+              <img class="sponsor-logo" src="./assets/jojocode-sponsor.svg" alt="JOJO Code Official Codex++ Relay" />
+              <div class="sponsor-copy">
+                <p class="eyebrow" data-i18n="sponsorEyebrow">独家赞助商</p>
+                <h3>JOJOCODE</h3>
+                <p data-i18n="sponsorBody">
+                  JOJO Code 是 Codex++ 官方中转站，提供价格划算、稳定易接入的 Codex API 中转服务，支持 GPT-5.5、GPT-5.4、Claude Opus 4.8、Claude Opus 4.7、gpt-image-2 等模型与图像能力，适合日常开发、快速配置、团队协作和长期使用。
+                </p>
+                <div class="button-row">
+                  <button class="text-button primary link-button" type="button" data-action="openExternalUrl" data-url="https://jojocode.com/" data-i18n="sponsorVisit">访问 JOJO Code</button>
+                  <code>https://jojocode.com/</code>
+                </div>
+              </div>
+            </article>
+          </section>
+        </section>
+
+        <section class="page" data-view="history">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">ONE-CLICK HISTORY REPAIR</p>
+                <h3 data-i18n="historyTitle">一键修复历史对话</h3>
+              </div>
+              <div class="button-row">
+                <button class="text-button primary history-repair-action" id="historyRepairAutoButton" type="button" data-action="repairHistoryAuto" data-i18n="historyRepairOneClick">一键修复</button>
+                <button class="text-button" type="button" data-action="refreshHistory" data-i18n="historyRefresh">重新扫描</button>
+              </div>
+            </div>
+            <div class="history-one-click">
+              <strong id="historyOneClickSummary" data-i18n="historyScanIdle">尚未扫描，点击重新扫描获取历史来源。</strong>
+              <span id="historyRecoverableSummary">-</span>
+            </div>
+            <dl class="detail-list compact">
+              <div><dt data-i18n="historyTarget">修复目标</dt><dd id="historyTargetPath">-</dd></div>
+              <div><dt data-i18n="historyRecommendedSource">推荐来源</dt><dd id="historyRecommendedSource">-</dd></div>
+              <div><dt data-i18n="historyBackupRoot">备份目录</dt><dd id="historyBackupRoot">-</dd></div>
+            </dl>
+            <p class="warning-copy" data-i18n="historyRepairHint">
+              自动选择最近的可恢复 Claude 历史来源，先备份当前 Claude-3p，再恢复聊天 IndexedDB、附件和本地 Code/Cowork 会话。
+            </p>
+
+            <h4 class="subsection-title" data-i18n="historyRepairLogTitle">修复结果</h4>
+            <div id="historyRepairLog" class="evidence-log"></div>
+            <details class="history-diagnostics">
+              <summary data-i18n="historyShowDetails">查看诊断详情</summary>
+              <div id="historyProfiles" class="provider-list compact-list"></div>
+            </details>
+          </section>
+        </section>
+
+        <section class="page" data-view="sandbox">
+          <section class="panel compact-security-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">SECURITY POLICY</p>
+                <h3 data-i18n="sandboxTitle">安全策略</h3>
+              </div>
+              <button class="text-button primary" type="button" data-action="saveSandbox" data-i18n="saveSandbox">保存策略</button>
+            </div>
+            <form id="sandboxForm" class="option-list compact-security-form">
+              <input name="inject_provider" type="checkbox" checked hidden />
+              <input name="inject_api_key" type="checkbox" hidden />
+              <label class="toggle-line danger-line">
+                <span data-i18n="relaxSandbox">允许 --no-sandbox 启动（高级）</span>
+                <input name="relax_sandbox" type="checkbox" />
+              </label>
+              <label class="check-line">
+                <input name="acknowledged" type="checkbox" />
+                <span data-i18n="sandboxAck">我理解解除沙盒会降低隔离强度，只在可信环境使用</span>
+              </label>
+            </form>
+            <div class="security-note">
+              <strong data-i18n="officialCapabilityTitle">内置能力入口</strong>
+              <p data-i18n="officialCapabilityHint">
+                Cowork、Code、浏览器控制和插件市场能力已移到“内置能力”页面统一启用。
+              </p>
+            </div>
+            <p class="warning-copy" data-i18n="sandboxWarning">
+              这里只保留高级启动安全开关；日常配置 API 或启用 Claude Desktop 内置能力不需要动这里。
+            </p>
+          </section>
+        </section>
+
+        <section class="page" data-view="about">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">ABOUT CLAUDE++</p>
+                <h3 data-i18n="aboutTitle">关于 Claude++</h3>
+              </div>
+            </div>
+            <dl class="detail-list compact">
+              <div><dt data-i18n="aboutVersion">当前版本</dt><dd id="aboutVersion">0.1.32</dd></div>
+              <div><dt data-i18n="aboutInstall">安装位置</dt><dd id="aboutInstallPath">-</dd></div>
+              <div><dt data-i18n="aboutConfig">配置文件</dt><dd id="aboutConfigPath">-</dd></div>
+            </dl>
+            <p class="warning-copy" data-i18n="aboutBoundary">
+              Claude++ 负责本地配置、增强启动、内置能力启用、历史修复和系统诊断。
+            </p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">FEATURE MAP</p>
+                <h3 data-i18n="aboutFeaturesTitle">主要功能</h3>
+              </div>
+            </div>
+            <div id="aboutFeatureList" class="recommendation-grid compact"></div>
+          </section>
+        </section>
+
+        <section class="page" data-view="logs">
+          <section class="panel terminal-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">OPERATOR STREAM</p>
+                <h3 data-i18n="logsTitle">运行日志</h3>
+              </div>
+              <button class="text-button" type="button" data-action="clearLogs" data-i18n="clearLogs">清空日志</button>
+            </div>
+            <div class="terminal-window" id="terminalWindow" tabindex="0"></div>
+          </section>
+        </section>
+      </section>
+    </main>
+    <section id="providerModal" class="modal-backdrop" hidden>
+      <div class="modal-shell provider-modal" role="dialog" aria-modal="true" aria-labelledby="providerModalTitle">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">API SETUP</p>
+            <h3 id="providerModalTitle" data-i18n="providerModalTitle">API 配置</h3>
+          </div>
+          <button class="text-button" type="button" data-action="cancelProviderEdit" data-i18n="cancelEdit">取消编辑</button>
+        </div>
+        <p class="bridge-state" data-i18n="providerFormHint">保存后会设为当前 API；编辑已有配置时，Key 留空会保留原 Key。</p>
+        <form id="providerForm" class="form-grid provider-modal-form">
+          <input name="id" type="hidden" />
+          <input name="app_type" type="hidden" value="claude" />
+          <label>
+            <span data-i18n="providerName">名称</span>
+            <input name="name" type="text" placeholder="WalkCoding Codex" autocomplete="off" />
+          </label>
+          <label>
+            <span data-i18n="baseUrl">Base URL</span>
+            <input name="base_url" type="url" placeholder="https://api.example.com/v1" autocomplete="off" />
+          </label>
+          <label>
+            <span data-i18n="providerProtocolLabel">协议</span>
+            <select name="protocol">
+              <option value="anthropic" data-i18n="providerProtocolAnthropic">Anthropic 兼容</option>
+              <option value="openai" data-i18n="providerProtocolOpenAI">OpenAI / Codex 兼容</option>
+            </select>
+          </label>
+          <label>
+            <span data-i18n="apiKey">API Key</span>
+            <input name="api_key" type="password" placeholder="sk-..." autocomplete="off" />
+          </label>
+          <label class="check-line">
+            <input name="enabled" type="checkbox" checked />
+            <span data-i18n="enabled">启用</span>
+          </label>
+
+          <div class="model-discovery-bar">
+            <button class="text-button" type="button" data-action="discoverProviderModels" data-i18n="discoverModels">获取模型</button>
+            <p id="providerModelDiscoveryStatus" class="bridge-state" data-i18n="modelDiscoveryStatusIdle">根据 Base URL 和 API Key 自动获取模型。</p>
+          </div>
+
+          <section id="mappingEditor" class="mapping-editor">
+            <div class="mapping-editor-head">
+              <div>
+                <p class="eyebrow">MODEL ROUTES</p>
+                <h3 data-i18n="modelMappingTitle">模型映射</h3>
+              </div>
+              <button id="addMappingRowButton" class="text-button" type="button" data-i18n="addModelMapping">添加映射</button>
+            </div>
+            <p class="bridge-state" data-i18n="modelMappingHint">Claude Desktop 需要 Claude 风格路由；这里把这些路由映射到真实上游模型。</p>
+            <div id="mappingRows" class="mapping-rows"></div>
+          </section>
+
+          <div class="modal-actions">
+            <button class="text-button primary" type="submit" data-i18n="saveProvider">保存并设为当前</button>
+            <button class="text-button" type="button" data-action="cancelProviderEdit" data-i18n="cancelEdit">取消编辑</button>
+          </div>
+        </form>
+      </div>
+    </section>
+    <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="false"></div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+/target/
+/.idea/
+/.vscode/
+/.cargo/
+node_modules/
+dist/
+/package.json
+/package-lock.json
+src-tauri/target/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/schemas/
+*.log
+*.tmp
+*.asar
+*.msix
+*.exe

@@ -1,0 +1,9 @@
+[package]
+name = "claude-plus-launcher"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+claude-plus-core = { path = "../claude-plus-core" }

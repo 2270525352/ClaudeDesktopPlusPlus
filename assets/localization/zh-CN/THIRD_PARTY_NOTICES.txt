@@ -1,0 +1,6 @@
+﻿Chinese localization resources are bundled from:
+- https://github.com/CyrusNee/claude-desktop-zh-cn
+
+License: MIT. See LICENSE-CyrusNee-claude-desktop-zh-cn.txt.
+
+Claude++ uses these static zh-CN JSON resources and installs them with a Cowork-compatible resource patch. It does not patch app.asar for online-page DOM translation by default.
