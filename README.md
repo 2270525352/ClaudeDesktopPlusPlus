@@ -1,47 +1,195 @@
-# Claude++
+# ClaudeDesktopPlusPlus
 
-Claude++ is an unofficial desktop enhancement tool for Claude Desktop. It is
-built with Rust, Tauri, and a terminal-style cyberpunk control console.
+中文 | English coming soon
 
-The project focuses on local configuration, launch orchestration, third-party
-API provider setup, Claude Desktop readiness checks, official plugin discovery,
-history repair, and one-click Chinese localization.
+![License](https://img.shields.io/badge/license-MIT-green)
+![Rust](https://img.shields.io/badge/Rust-2021-orange)
+![Tauri](https://img.shields.io/badge/Tauri-2.x-24c8db)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey)
 
-> Claude++ is not affiliated with Anthropic. Use it only in environments where
-> you are allowed to manage Claude Desktop configuration and local resources.
+ClaudeDesktopPlusPlus 是面向 Claude Desktop 的外部增强启动器和管理工具。它通过独立桌面控制台管理 Claude Desktop 的启动、第三方 API 配置、插件能力、汉化资源、历史修复和系统就绪检查，目标是让 Claude Desktop 在开发者场景下更容易配置、更容易排查、更舒服地使用。
 
-## Features
+> 本项目不是 Anthropic 官方项目。Claude Desktop、Claude、Claude Code、Cowork 等名称和能力归其各自权利方所有。请只在你有权管理的本机环境中使用本工具。
 
-- Windows desktop app packaged with Tauri / NSIS.
-- Chinese-first UI with English switching.
-- cc-switch configuration sync and provider list cleanup.
-- Direct / Gateway connection mode management for third-party APIs.
-- OpenAI / Codex compatible provider model discovery and mapping hints.
-- One-click Claude Desktop launch through the installed modern app package.
-- System readiness page for Claude Desktop installer and Windows VMP checks.
-- Official Claude plugin marketplace sync, search, pagination, and install.
-- One-click Chinese localization resource patch.
-- One-click local history repair with backup.
-- Local sponsor / recommendation page support.
+## 快速使用
 
-## Repository Layout
+从 GitHub Releases 下载最新版安装包：
+
+- Windows：`Claude++_*-x64-setup.exe`
+- macOS：规划中，当前仓库保留 macOS 探测和启动路线，发布包会在验证后开放
+
+安装后启动 `Claude++`，默认进入中文控制台。常用流程：
+
+1. 在「系统就绪」里检查 Claude Desktop 是否为现代安装包版本。
+2. 在「API 配置」里同步 `cc-switch` 或手动添加第三方 API。
+3. 选择直连或 Gateway 模式，测试凭据和模型列表。
+4. 在「能力插件」里同步官方插件目录，搜索并安装需要的插件。
+5. 需要恢复本地记录时，进入「历史对话」点击一键修复。
+6. 需要中文界面时，在顶部点击一键汉化，然后重启 Claude Desktop。
+
+## 独家赞助商
+
+[JOJO Code](https://jojocode.com/) 是 Codex++ 官方中转站，提供价格划算、稳定易接入的 Codex API 中转服务，支持 GPT-5.5、GPT-5.4、Claude Opus 4.8、Claude Opus 4.7、gpt-image-2 等模型与图像能力，适合日常开发、快速配置、团队协作和长期使用。
+
+## 主要功能
+
+- Rust 后端 + Tauri 桌面壳，控制台不依赖浏览器页面运行。
+- 中文优先 UI，支持中英文切换。
+- cc-switch 配置同步，自动去重过期残留配置。
+- 第三方 API Provider 管理，支持 Anthropic 兼容与 OpenAI / Codex 兼容两类协议。
+- 直连模式与本地 Gateway 模式切换。
+- OpenAI / Codex 兼容接口的模型发现、模型映射提示和兼容性检测。
+- 一键启动 Claude Desktop，优先识别 Windows MSIX / modern installer。
+- 系统就绪检查，显示 Claude 安装方式、VMP、Hypervisor、重启状态等信息。
+- 官方插件市场同步，支持搜索、分页加载和安装。
+- 一键汉化，通过资源补丁安装 zh-CN 文案，不默认修改 `app.asar`。
+- 一键修复历史对话，自动选择可恢复来源并先备份当前 Claude-3p 数据。
+- 推荐页广告位，当前内置 JOJO Code 赞助商展示。
+- 本地日志和状态提示，按钮操作结果会在当前页面即时弹窗展示。
+
+## 痛点与解决
+
+### 第三方 API 配置太散
+
+Claude Desktop、cc-switch、第三方 API 平台通常各有一套配置方式，新用户很容易填错协议、Base URL、Key 或模型名。ClaudeDesktopPlusPlus 将这些入口收敛到「API 配置」页：
+
+- 可从 `cc-switch` 同步已有配置。
+- 可手动新增第三方 API。
+- 可测试凭据是否可用。
+- 可根据 Base URL 和 Key 拉取模型列表。
+- 可提示 OpenAI / Codex 兼容接口在直连模式下需要上游完成模型映射。
+
+### 直连和 Gateway 边界不清楚
+
+直连模式适合已经提供 Anthropic 兼容路由和模型映射的上游。Gateway 模式适合上游只有 OpenAI / Codex 兼容协议、需要本地转换请求的场景。
+
+控制台会在总览页提示：
+
+- OpenAI / Codex 协议想走直连，需要第三方平台提前做好模型映射。
+- 如果模型映射不完整，建议使用 Gateway 兼容模式。
+- Gateway 会提升兼容性，但也可能限制某些 Claude Desktop 的本地能力表现。
+
+### Claude Desktop 安装方式不满足 Cowork 要求
+
+Windows 上 Cowork / workspace 能力要求 Claude Desktop 使用现代安装器，并依赖 Virtual Machine Platform。ClaudeDesktopPlusPlus 的「系统就绪」页会检测：
+
+- 当前 Claude Desktop 安装来源。
+- MSIX AppUserModelID。
+- Virtual Machine Platform 状态。
+- Hypervisor Platform 状态。
+- 是否需要重启。
+
+工具提供一键安装 Claude Desktop modern installer 和一键启用 VMP 的入口。若 Windows 组件本身返回 DISM 错误，页面会展示原始日志，方便继续排查系统镜像、固件虚拟化或策略限制。
+
+### 插件市场为空或不好找
+
+Claude Desktop 内部组织插件列表可能受账号或组织策略影响。ClaudeDesktopPlusPlus 额外提供「能力插件」页，用 Claude 官方 CLI 同步官方插件目录，并在本机插件市场中搜索、分页和安装。
+
+已支持的典型插件包括：
+
+- `playwright`：浏览器自动化和页面测试。
+- `github`：仓库、Issue、Pull Request 管理。
+- `context7`：拉取版本化文档与代码示例。
+- `frontend-design`：高质量前端界面生成辅助。
+- `typescript-lsp`、`pyright-lsp`、`rust-analyzer-lsp` 等语言服务插件。
+
+中文界面下会对常见插件名称和说明做本地化展示。
+
+### 切换账号或渠道后历史对话丢失
+
+Claude Desktop 的本地缓存可能分散在官方 profile、Claude-3p profile、MSIX 虚拟化目录等位置。ClaudeDesktopPlusPlus 提供「历史对话」页：
+
+- 自动扫描本机可恢复来源。
+- 自动选择最近且含有可恢复数据的来源。
+- 修复前备份当前 Claude-3p 目标目录。
+- 默认恢复聊天 IndexedDB、附件、本地 Agent 会话、Claude Code 会话。
+- Local Storage / Session Storage 只扫描，不默认恢复，避免污染登录态。
+
+## API 配置与模型映射
+
+ClaudeDesktopPlusPlus 支持两类 Provider：
+
+### Anthropic 兼容
+
+适合已经提供 Claude / Anthropic 风格接口的上游。通常可以使用直连模式。
+
+### OpenAI / Codex 兼容
+
+适合 Codex、OpenAI 风格中转站。它们通常通过 `/v1/models`、`/v1/chat/completions` 或类似路由暴露模型。若要在 Claude Desktop 中直连使用，第三方平台需要提前把 Claude 模型名映射到真实上游模型，例如：
 
 ```text
-apps/desktop/                 Tauri desktop shell
-apps/desktop/src-tauri/       Rust backend for the desktop app
-crates/claude-plus-core/      Shared launcher, install, CDP, and ASAR helpers
-crates/claude-plus-launcher/  CLI prototype
-ui/cyber-console/             Static control-console UI
-assets/inject/                Runtime injection scripts
-assets/localization/          Bundled zh-CN resources with third-party notices
-docs/                         Research and implementation notes
+claude-opus-4-5   -> gpt-5.5
+claude-sonnet-4-5 -> gpt-5.4
+claude-haiku-4-5  -> gpt-5.4-mini
 ```
 
-## Build
+如果上游不支持这种直连映射，请使用 Gateway 模式。Gateway 会在本机转换请求并转发到上游。
 
-Install Node.js, Rust, and the Windows build dependencies required by Tauri.
-On Windows this project can build with the local `stable-x86_64-pc-windows-gnullvm`
-toolchain route used by the desktop scripts.
+## 一键汉化
+
+一键汉化会安装 zh-CN 资源文件并写入 Claude locale。当前策略是 Cowork 兼容的资源补丁：
+
+- 不默认 patch `app.asar`。
+- 会写入必要的 zh-CN JSON 资源。
+- 可一键启用或停用。
+- 启用后需要重启 Claude Desktop 才能完整生效。
+
+汉化资源来自开源项目，授权和第三方说明保存在：
+
+```text
+assets/localization/zh-CN/
+```
+
+## 数据位置
+
+常见本地路径：
+
+- Claude++ 配置：`%APPDATA%\Claude++`
+- Claude++ 3P profile：`%LOCALAPPDATA%\Claude-3p`
+- Claude 官方 profile：`%APPDATA%\Claude`
+- cc-switch 配置：`%USERPROFILE%\.cc-switch`
+- Claude CLI 插件目录：`%USERPROFILE%\.claude\plugins`
+- Claude++ 构建产物：`apps/desktop/src-tauri/target/`
+
+仓库不会提交用户 API Key、Claude 登录态、本地缓存、构建产物或安装包。
+
+## 常见问题
+
+### 为什么 OpenAI / Codex 配置直连后没有模型？
+
+直连依赖上游提供 Claude Desktop 能识别的模型名和协议形态。如果第三方平台只提供 OpenAI / Codex 原生模型列表，需要在平台侧配置模型映射，或者改用 Gateway 模式。
+
+### 为什么 Gateway 能通，但某些能力像本地模式？
+
+Gateway 是本地协议转换层，能提升 API 兼容性，但不能替代 Claude 官方账号、组织权限或 Claude Desktop 内部能力检查。需要官方登录态的能力仍由 Claude Desktop 和账号策略决定。
+
+### 为什么启用 VMP 失败？
+
+如果 DISM 返回错误，通常不是按钮本身失败，而是系统组件、Windows 版本、固件虚拟化、组策略或系统镜像存在限制。请先确认 BIOS/UEFI 已开启虚拟化，并检查 Windows 功能组件是否完整。
+
+### 为什么插件页显示官方目录，但 Claude Desktop 组织插件仍为空？
+
+ClaudeDesktopPlusPlus 安装的是本机 Claude CLI 插件目录。Claude Desktop 内部组织插件列表仍可能由 Claude 账号、组织后台和官方策略控制。
+
+### 历史修复会复制登录凭证吗？
+
+默认不会。工具只恢复聊天 IndexedDB、附件和本地工作会话。Local Storage / Session Storage 会扫描用于诊断，但不会默认恢复。
+
+## 开发
+
+前端脚本检查：
+
+```powershell
+node --check ui\cyber-console\app.js
+```
+
+Rust 检查：
+
+```powershell
+cargo +stable-x86_64-pc-windows-gnullvm check --target x86_64-pc-windows-gnullvm -q
+```
+
+启动桌面开发模式：
 
 ```powershell
 cd apps/desktop
@@ -49,39 +197,30 @@ npm install
 npm run dev
 ```
 
-Build the desktop executable:
-
-```powershell
-cd apps/desktop
-npm run build
-```
-
-Build the Windows installer:
+构建安装包：
 
 ```powershell
 cd apps/desktop
 npm run bundle
 ```
 
-The installer is generated under:
+主要结构：
 
 ```text
-apps/desktop/src-tauri/target/x86_64-pc-windows-gnullvm/release/bundle/nsis/
+apps/desktop/                 Tauri 桌面控制台
+apps/desktop/src-tauri/       桌面后端命令、系统检测、插件、历史修复
+crates/claude-plus-core/      安装探测、CDP、launcher、asar patch 原型
+crates/claude-plus-launcher/  CLI 原型入口
+ui/cyber-console/             控制台静态 UI
+assets/inject/                注入脚本
+assets/localization/          zh-CN 汉化资源
+docs/                         研究笔记
 ```
 
-## Safety Notes
+## 说明
 
-- API keys are stored in the user's local application configuration, not in the
-  repository.
-- Claude++ does not include Claude account credentials.
-- Direct mode depends on the provider exposing Anthropic-compatible routes and,
-  for OpenAI / Codex style providers, compatible model mapping.
-- Gateway mode is available for compatibility when the upstream provider does
-  not expose a Claude-compatible direct route.
-- History repair only copies local cache/session data after creating a backup.
-- Chinese localization resources include their upstream MIT license and notices
-  in `assets/localization/zh-CN/`.
+ClaudeDesktopPlusPlus 是外部增强工具。Claude Desktop 更新后，如果安装结构、配置格式、插件目录或内置能力策略变化，可能需要同步更新本项目的探测和适配逻辑。
 
 ## License
 
-Claude++ is released under the MIT License. See `LICENSE`.
+MIT License. See [LICENSE](LICENSE).
