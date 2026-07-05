@@ -282,8 +282,8 @@ npm run bundle
 发布流程：
 
 ```powershell
-git tag v0.1.41
-git push origin v0.1.41
+git tag v0.1.42
+git push origin v0.1.42
 ```
 
 GitHub Actions 会在 tag 推送后自动构建 Windows 和 macOS Release 产物。

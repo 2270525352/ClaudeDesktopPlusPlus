@@ -1,14 +1,7 @@
 {
-  "build": {
-    "beforeBundleCommand": "node ./scripts/copy-windows-runtime.mjs"
-  },
   "bundle": {
     "targets": ["nsis"],
     "icon": ["icons/icon.ico"],
-    "resources": {
-      "target/x86_64-pc-windows-gnullvm/release/libunwind.dll": "libunwind.dll",
-      "target/x86_64-pc-windows-gnullvm/release/WebView2Loader.dll": "WebView2Loader.dll"
-    },
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico",
