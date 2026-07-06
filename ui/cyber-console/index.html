@@ -27,7 +27,6 @@
           <button class="nav-item" type="button" data-page="capabilities" data-i18n="navCapabilities">内置能力</button>
           <button class="nav-item" type="button" data-page="tools" data-i18n="navTools">能力插件</button>
           <button class="nav-item" type="button" data-page="providers" data-i18n="navProviders">API 配置</button>
-          <button class="nav-item" type="button" data-page="recommendations" data-i18n="navRecommendations">推荐</button>
           <button class="nav-item" type="button" data-page="history" data-i18n="navHistory">历史修复</button>
           <button class="nav-item" type="button" data-page="sandbox" data-i18n="navSandbox">安全策略</button>
           <button class="nav-item" type="button" data-page="about" data-i18n="navAbout">关于</button>
@@ -64,49 +63,92 @@
         <div id="noticeBar" class="notice-bar" role="status" aria-live="polite" hidden></div>
 
         <section class="page active" data-view="overview">
-          <section class="status-grid">
-            <article class="status-card">
-              <span class="led green"></span>
-              <p data-i18n="installStatus">Claude 安装</p>
-              <strong id="installSummary">扫描中</strong>
+          <section class="panel doctor-hero">
+            <div class="doctor-hero-copy">
+              <p class="eyebrow">CLAUDE DOCTOR</p>
+              <h3 data-i18n="doctorTitle">Claude 体检报告</h3>
+              <p data-i18n="doctorSubtitle">检查安装、系统、API、插件、汉化和历史状态。</p>
+            </div>
+            <div class="doctor-verdict">
+              <span id="doctorVerdictBadge" class="seal warn" data-i18n="doctorScanning">扫描中</span>
+              <strong id="doctorVerdict" data-i18n="doctorScanning">扫描中</strong>
+              <p id="doctorVerdictDetail">-</p>
+            </div>
+            <div class="button-row doctor-hero-actions">
+              <button class="text-button primary" type="button" data-action="doctorFixAndLaunch" data-i18n="doctorPrimaryAction">一键修复并启动</button>
+              <button class="text-button" type="button" data-action="refreshState" data-i18n="refresh">刷新状态</button>
+            </div>
+          </section>
+
+          <section class="doctor-grid" aria-label="Claude 体检项目">
+            <article class="doctor-card" data-domain="install">
+              <div class="doctor-card-head">
+                <span class="led green"></span>
+                <strong data-i18n="doctorInstallTitle">Claude Desktop</strong>
+                <span id="doctorInstallBadge" class="seal warn">-</span>
+              </div>
+              <p id="doctorInstallSummary">-</p>
+              <small id="doctorInstallMeta">-</small>
+              <button class="text-button" type="button" data-action="gotoSystem" data-i18n="doctorOpenSystem">系统就绪</button>
             </article>
-            <article class="status-card">
-              <span class="led cyan"></span>
-              <p data-i18n="ccSwitchStatus">cc-switch 同步</p>
-              <strong id="ccSwitchSummary">扫描中</strong>
+            <article class="doctor-card" data-domain="system">
+              <div class="doctor-card-head">
+                <span class="led cyan"></span>
+                <strong data-i18n="doctorSystemTitle">系统能力</strong>
+                <span id="doctorSystemBadge" class="seal warn">-</span>
+              </div>
+              <p id="doctorSystemSummary">-</p>
+              <small id="doctorSystemMeta">-</small>
+              <button class="text-button" type="button" data-action="gotoSystem" data-i18n="doctorOpenSystem">系统就绪</button>
             </article>
-            <article class="status-card">
-              <span class="led violet"></span>
-              <p data-i18n="activeProvider">当前 API</p>
-              <strong id="providerSummary">未配置</strong>
+            <article class="doctor-card" data-domain="api">
+              <div class="doctor-card-head">
+                <span class="led violet"></span>
+                <strong data-i18n="doctorApiTitle">API 渠道</strong>
+                <span id="doctorApiBadge" class="seal warn">-</span>
+              </div>
+              <p id="doctorApiSummary">-</p>
+              <small id="doctorApiMeta">-</small>
+              <button class="text-button" type="button" data-action="gotoProviders" data-i18n="doctorOpenProviders">API 配置</button>
             </article>
-            <article class="status-card">
-              <span class="led amber"></span>
-              <p data-i18n="sandboxStatus">沙盒策略</p>
-              <strong id="sandboxSummary">默认</strong>
+            <article class="doctor-card" data-domain="plugins">
+              <div class="doctor-card-head">
+                <span class="led cyan"></span>
+                <strong data-i18n="doctorPluginTitle">插件能力</strong>
+                <span id="doctorPluginBadge" class="seal warn">-</span>
+              </div>
+              <p id="doctorPluginSummary">-</p>
+              <small id="doctorPluginMeta">-</small>
+              <button class="text-button" type="button" data-action="gotoTools" data-i18n="doctorOpenTools">能力插件</button>
             </article>
-            <article class="status-card">
-              <span class="led cyan"></span>
-              <p data-i18n="gatewayStatus">Gateway 网关</p>
-              <strong id="gatewaySummary">扫描中</strong>
+            <article class="doctor-card" data-domain="localization">
+              <div class="doctor-card-head">
+                <span class="led amber"></span>
+                <strong data-i18n="doctorLocalizationTitle">汉化状态</strong>
+                <span id="doctorLocalizationBadge" class="seal warn">-</span>
+              </div>
+              <p id="doctorLocalizationSummary">-</p>
+              <small id="doctorLocalizationMeta">-</small>
+              <button class="text-button" type="button" data-action="enableChineseLocalization" data-i18n="enableChineseLocalization">一键启用汉化</button>
+            </article>
+            <article class="doctor-card" data-domain="history">
+              <div class="doctor-card-head">
+                <span class="led green"></span>
+                <strong data-i18n="doctorHistoryTitle">历史对话</strong>
+                <span id="doctorHistoryBadge" class="seal warn">-</span>
+              </div>
+              <p id="doctorHistorySummary">-</p>
+              <small id="doctorHistoryMeta">-</small>
+              <button class="text-button" type="button" data-action="gotoHistory" data-i18n="doctorOpenHistory">历史修复</button>
             </article>
           </section>
 
-          <section class="overview-callout" role="note">
-            <p class="eyebrow" data-i18n="directCompatibilityTitle">直连兼容提醒</p>
-            <p data-i18n="directCompatibilityHint">
-              配置 Codex / OpenAI 类型协议并使用直连时，需要第三方平台提前做好 Claude 模型映射和 Anthropic /v1/messages 兼容；否则请使用 Gateway 模式。
-            </p>
-          </section>
-
-          <section class="panel split-panel">
+          <section class="panel doctor-queue-panel">
             <div>
-              <p class="eyebrow" data-i18n="quickActions">快捷操作</p>
-              <h3 data-i18n="nextSteps">下一步</h3>
+              <p class="eyebrow" data-i18n="doctorNextQueue">建议处理顺序</p>
+              <h3 data-i18n="doctorNextTitle">下一步</h3>
             </div>
-            <div class="action-stack">
-              <button class="text-button primary" type="button" data-action="syncCcSwitch" data-i18n="syncCcSwitch">同步 cc-switch 配置</button>
-            </div>
+            <div id="doctorQueue" class="doctor-queue"></div>
           </section>
         </section>
 
@@ -351,32 +393,6 @@
               </div>
             </div>
             <div id="providerPresetList" class="recommendation-grid"></div>
-          </section>
-        </section>
-
-        <section class="page" data-view="recommendations">
-          <section class="panel sponsor-panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">SPONSOR SLOT</p>
-                <h3 data-i18n="recommendationsTitle">独家赞助商</h3>
-              </div>
-              <span class="seal ok" data-i18n="sponsorBadge">OFFICIAL RELAY</span>
-            </div>
-            <article class="sponsor-card">
-              <img class="sponsor-logo" src="./assets/jojocode-sponsor.svg" alt="JOJO Code Official Codex++ Relay" />
-              <div class="sponsor-copy">
-                <p class="eyebrow" data-i18n="sponsorEyebrow">独家赞助商</p>
-                <h3>JOJOCODE</h3>
-                <p data-i18n="sponsorBody">
-                  JOJO Code 是 Codex++ 官方中转站，提供价格划算、稳定易接入的 Codex API 中转服务，支持 GPT-5.5、GPT-5.4、Claude Opus 4.8、Claude Opus 4.7、gpt-image-2 等模型与图像能力，适合日常开发、快速配置、团队协作和长期使用。
-                </p>
-                <div class="button-row">
-                  <button class="text-button primary link-button" type="button" data-action="openExternalUrl" data-url="https://jojocode.com/" data-i18n="sponsorVisit">访问 JOJO Code</button>
-                  <code>https://jojocode.com/</code>
-                </div>
-              </div>
-            </article>
           </section>
         </section>
 

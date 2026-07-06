@@ -24,7 +24,7 @@
       navAbout: "关于",
       navLogs: "运行日志",
       systemNode: "SYSTEM NODE 07",
-      overviewTitle: "控制总览",
+      overviewTitle: "Claude 体检报告",
       systemPageTitle: "系统就绪",
       capabilitiesPageTitle: "内置能力",
       toolsPageTitle: "能力插件",
@@ -58,6 +58,57 @@
       installClaudeModern: "一键安装 Claude Desktop",
       enableVmp: "一键启用 VMP",
       systemReadyHint: "Cowork 需要 modern installer、VMP 和一次系统重启。",
+      doctorTitle: "Claude 体检报告",
+      doctorSubtitle: "检查安装、系统、API、插件、汉化和历史状态。",
+      doctorPrimaryAction: "一键修复并启动",
+      doctorNextQueue: "建议处理顺序",
+      doctorNextTitle: "下一步",
+      doctorScanning: "扫描中",
+      doctorReady: "就绪",
+      doctorNeedsAction: "需处理",
+      doctorError: "异常",
+      doctorReadyVerdict: "Claude Desktop 已准备好",
+      doctorIssuesVerdict: "发现 {count} 个待处理项",
+      doctorScanningVerdict: "正在补齐体检数据",
+      doctorReadyDetail: "可以按当前配置启动 Claude Desktop。",
+      doctorIssueDetail: "优先处理：{item}",
+      doctorNoState: "等待桌面桥返回状态。",
+      doctorInstallTitle: "Claude Desktop",
+      doctorSystemTitle: "系统能力",
+      doctorApiTitle: "API 渠道",
+      doctorPluginTitle: "插件能力",
+      doctorLocalizationTitle: "汉化状态",
+      doctorHistoryTitle: "历史对话",
+      doctorInstallOk: "已检测到 Claude Desktop",
+      doctorInstallMissing: "未检测到 Claude Desktop",
+      doctorSystemScanning: "正在读取 Windows / macOS 系统能力",
+      doctorSystemReady: "系统能力满足当前启动需求",
+      doctorSystemNeedsModern: "需要 modern installer 才能完整使用 Cowork",
+      doctorSystemNeedsVmp: "Virtual Machine Platform 未启用",
+      doctorSystemNeedsRestart: "系统功能已暂存，需要重启",
+      doctorSystemMeta: "VMP: {vmp} / Hypervisor: {hypervisor}",
+      doctorApiReady: "当前 API 可用于启动",
+      doctorApiMissing: "还没有当前 API 配置",
+      doctorApiNeedsConfig: "当前 API 缺少可用 Base URL 或 Key",
+      doctorApiOpenAIDirectWarning: "OpenAI / Codex 直连依赖上游模型映射",
+      doctorApiMeta: "{protocol} / {mode}",
+      doctorPluginScanning: "正在读取内置能力和插件目录",
+      doctorPluginReady: "插件运行环境和官方目录可用",
+      doctorPluginNeedsSetup: "插件或内置能力还未准备好",
+      doctorPluginMeta: "官方目录 {count} 个插件",
+      doctorLocalizationReady: "中文资源补丁已启用",
+      doctorLocalizationMissing: "未启用中文资源补丁",
+      doctorHistoryScanning: "正在扫描本地历史来源",
+      doctorHistoryReady: "没有发现需要修复的本地历史",
+      doctorHistoryRecoverable: "发现可恢复历史来源",
+      doctorHistoryMeta: "目标：{target}",
+      doctorOpenSystem: "系统就绪",
+      doctorOpenProviders: "API 配置",
+      doctorOpenTools: "能力插件",
+      doctorOpenHistory: "历史修复",
+      doctorQueueEmpty: "暂无待处理项。",
+      doctorQueueLaunchReady: "启动 Claude Desktop",
+      doctorQueueGo: "处理",
       capabilitiesTitle: "Claude Desktop 内置能力中心",
       enableDeveloperCapabilities: "一键启用内置能力",
       capabilityBrowserMcp: "浏览器控制能力",
@@ -412,7 +463,7 @@
       navAbout: "About",
       navLogs: "Run Logs",
       systemNode: "SYSTEM NODE 07",
-      overviewTitle: "Control Overview",
+      overviewTitle: "Claude Health Report",
       systemPageTitle: "System Ready",
       capabilitiesPageTitle: "Built-in Capabilities",
       toolsPageTitle: "Plugins",
@@ -446,6 +497,57 @@
       installClaudeModern: "Install Claude Desktop",
       enableVmp: "Enable VMP",
       systemReadyHint: "Cowork needs the modern installer, VMP, and one Windows restart.",
+      doctorTitle: "Claude Health Report",
+      doctorSubtitle: "Checks installation, system, API, plugins, localization, and history.",
+      doctorPrimaryAction: "Fix and Launch",
+      doctorNextQueue: "Suggested Order",
+      doctorNextTitle: "Next Step",
+      doctorScanning: "Scanning",
+      doctorReady: "Ready",
+      doctorNeedsAction: "Needs action",
+      doctorError: "Error",
+      doctorReadyVerdict: "Claude Desktop is ready",
+      doctorIssuesVerdict: "{count} item(s) need attention",
+      doctorScanningVerdict: "Completing health checks",
+      doctorReadyDetail: "Claude Desktop can be launched with the current setup.",
+      doctorIssueDetail: "Handle first: {item}",
+      doctorNoState: "Waiting for the desktop bridge state.",
+      doctorInstallTitle: "Claude Desktop",
+      doctorSystemTitle: "System",
+      doctorApiTitle: "API Provider",
+      doctorPluginTitle: "Plugin Runtime",
+      doctorLocalizationTitle: "Chinese UI",
+      doctorHistoryTitle: "History",
+      doctorInstallOk: "Claude Desktop detected",
+      doctorInstallMissing: "Claude Desktop was not detected",
+      doctorSystemScanning: "Reading Windows / macOS system capabilities",
+      doctorSystemReady: "System capabilities are ready for launch",
+      doctorSystemNeedsModern: "Modern installer is required for full Cowork support",
+      doctorSystemNeedsVmp: "Virtual Machine Platform is not enabled",
+      doctorSystemNeedsRestart: "System features are staged; restart required",
+      doctorSystemMeta: "VMP: {vmp} / Hypervisor: {hypervisor}",
+      doctorApiReady: "The active API can be used for launch",
+      doctorApiMissing: "No active API provider is configured",
+      doctorApiNeedsConfig: "The active API lacks a usable Base URL or key",
+      doctorApiOpenAIDirectWarning: "OpenAI / Codex direct mode depends on upstream model mapping",
+      doctorApiMeta: "{protocol} / {mode}",
+      doctorPluginScanning: "Reading built-in capabilities and plugin marketplace",
+      doctorPluginReady: "Plugin runtime and official marketplace are available",
+      doctorPluginNeedsSetup: "Plugins or built-in capabilities are not ready yet",
+      doctorPluginMeta: "Official marketplace: {count} plugins",
+      doctorLocalizationReady: "Chinese resource patch is enabled",
+      doctorLocalizationMissing: "Chinese resource patch is not enabled",
+      doctorHistoryScanning: "Scanning local history sources",
+      doctorHistoryReady: "No local history repair is needed",
+      doctorHistoryRecoverable: "Recoverable history source found",
+      doctorHistoryMeta: "Target: {target}",
+      doctorOpenSystem: "System",
+      doctorOpenProviders: "API Config",
+      doctorOpenTools: "Plugins",
+      doctorOpenHistory: "History",
+      doctorQueueEmpty: "No action needed.",
+      doctorQueueLaunchReady: "Launch Claude Desktop",
+      doctorQueueGo: "Open",
       capabilitiesTitle: "Claude Desktop Built-in Capability Center",
       enableDeveloperCapabilities: "Enable Built-in Capabilities",
       capabilityBrowserMcp: "Browser Control Capability",
@@ -1059,6 +1161,8 @@
   let capabilitiesLoading = false;
   let officialPluginsStatus = null;
   let officialPluginsLoading = false;
+  let overviewDiagnosticsStarted = false;
+  let overviewDiagnosticsLoading = false;
   let officialPluginSearchQuery = "";
   let officialPluginVisibleLimit = 12;
   const providerTestResults = new Map();
@@ -1251,6 +1355,9 @@
   function renderVisiblePage() {
     if (!state) return;
     const page = currentPage();
+    if (page === "overview") {
+      renderDoctorReport();
+    }
     if (page === "providers") {
       renderProviders(state.config.providers || []);
       renderRecommendations();
@@ -1302,6 +1409,10 @@
   }
 
   async function hydrateLazyPage(page, { force = false } = {}) {
+    if (page === "overview") {
+      hydrateOverviewDiagnostics({ force });
+      return;
+    }
     if (page === "system" && (force || !systemLoaded)) {
       await refreshSystemReadiness();
     }
@@ -1313,6 +1424,25 @@
     }
     if (page === "tools" && (force || !officialPluginsStatus)) {
       await refreshOfficialPlugins();
+    }
+  }
+
+  async function hydrateOverviewDiagnostics({ force = false } = {}) {
+    if (!state || overviewDiagnosticsLoading) return;
+    if (overviewDiagnosticsStarted && !force) return;
+    overviewDiagnosticsStarted = true;
+    overviewDiagnosticsLoading = true;
+    renderDoctorReport();
+    const tasks = [];
+    if (force || !systemLoaded) tasks.push(refreshSystemReadiness());
+    if (force || !capabilitiesStatus) tasks.push(refreshDeveloperCapabilities());
+    if (force || !officialPluginsStatus) tasks.push(refreshOfficialPlugins());
+    if (force || !historyLoaded) tasks.push(refreshHistoryStatus({ silent: true }));
+    try {
+      await Promise.allSettled(tasks);
+    } finally {
+      overviewDiagnosticsLoading = false;
+      renderDoctorReport();
     }
   }
 
@@ -1353,7 +1483,7 @@
     }
   }
 
-  async function refreshHistoryStatus() {
+  async function refreshHistoryStatus({ silent = false } = {}) {
     if (!state) return;
     if (historyLoading) return;
     historyLoading = true;
@@ -1367,7 +1497,7 @@
       }
       historyLoaded = true;
       renderHistory(scan);
-      log("OK", t("historyScanDone"));
+      if (!silent) log("OK", t("historyScanDone"));
     } catch (error) {
       log("ERR", t("commandFailed", { error: String(error) }));
     } finally {
@@ -1477,11 +1607,7 @@
 
   function renderState() {
     if (!state) {
-      document.getElementById("installSummary").textContent = t("installMissing");
-      document.getElementById("ccSwitchSummary").textContent = t("ccSwitchMissing");
-      document.getElementById("providerSummary").textContent = t("noProvider");
-      document.getElementById("sandboxSummary").textContent = t("sandboxDefault");
-      document.getElementById("gatewaySummary").textContent = t("gatewayStopped");
+      renderDoctorReport();
       renderConnectionMode({ enabled: false });
       renderVerification();
       renderHistory(null);
@@ -1493,18 +1619,10 @@
     const config = state.config;
     const ccSwitch = state.cc_switch;
     const activeProvider = config.providers.find((provider) => provider.active);
-    const sandboxBits = [];
 
-    document.getElementById("installSummary").textContent = install ? t("installFound") : t("installMissing");
-    document.getElementById("ccSwitchSummary").textContent = ccSwitch?.found ? t("ccSwitchFound", { count: ccSwitch.provider_count }) : t("ccSwitchMissing");
-    document.getElementById("providerSummary").textContent = activeProvider ? activeProvider.name : t("noProvider");
-
-    if (config.sandbox.inject_provider) sandboxBits.push(t("providerInjected"));
-    if (config.sandbox.inject_api_key) sandboxBits.push(t("keyInjected"));
-    if (config.sandbox.relax_sandbox) sandboxBits.push(t("sandboxRelaxed"));
-    document.getElementById("sandboxSummary").textContent = sandboxBits.join(" / ") || t("sandboxDefault");
     renderConnectionMode(config.gateway || { enabled: true, port: 49331 });
     renderGatewayStatus();
+    renderDoctorReport();
     renderVerification();
     renderProviderTest();
     renderSystemReadiness();
@@ -1531,6 +1649,281 @@
     hydrateGatewayForm(config.gateway || { enabled: true, port: 49331 });
   }
 
+  function featureEnabled(value) {
+    return String(value || "").toLowerCase() === "enabled";
+  }
+
+  function doctorBadgeLabel(level) {
+    if (level === "ok") return t("doctorReady");
+    if (level === "err") return t("doctorError");
+    if (level === "pending") return t("doctorScanning");
+    return t("doctorNeedsAction");
+  }
+
+  function doctorBadgeClass(level) {
+    if (level === "ok") return "seal ok";
+    if (level === "err") return "seal err";
+    return "seal warn";
+  }
+
+  function doctorSetCard(prefix, item) {
+    const badge = document.getElementById(`${prefix}Badge`);
+    const summary = document.getElementById(`${prefix}Summary`);
+    const meta = document.getElementById(`${prefix}Meta`);
+    const card = badge?.closest(".doctor-card");
+    if (badge) {
+      badge.className = doctorBadgeClass(item.level);
+      badge.textContent = doctorBadgeLabel(item.level);
+    }
+    if (summary) summary.textContent = item.summary || "-";
+    if (meta) meta.textContent = item.meta || "-";
+    if (card) {
+      card.classList.toggle("ok", item.level === "ok");
+      card.classList.toggle("warn", item.level === "warn" || item.level === "pending");
+      card.classList.toggle("err", item.level === "err");
+    }
+  }
+
+  function doctorItems() {
+    const config = state?.config || {};
+    const gateway = config.gateway || { enabled: true, port: 49331 };
+    const activeProvider = config.providers?.find((provider) => provider.active);
+    const system = state?.system || {};
+    const script = localizationScript();
+    const recommendedHistory = recommendedHistoryProfile(state?.history || null);
+    const pluginCount = officialPluginsStatus?.marketplace_plugin_count ?? officialPluginsStatus?.plugins?.length ?? 0;
+
+    const installItem = state?.install
+      ? {
+          key: "install",
+          prefix: "doctorInstall",
+          level: "ok",
+          summary: t("doctorInstallOk"),
+          meta: state.install.executable || state.install.working_dir || "-",
+          page: "system",
+          blocking: false,
+        }
+      : {
+          key: "install",
+          prefix: "doctorInstall",
+          level: "err",
+          summary: t("doctorInstallMissing"),
+          meta: t("installClaudeModern"),
+          page: "system",
+          blocking: true,
+        };
+
+    let systemItem = {
+      key: "system",
+      prefix: "doctorSystem",
+      level: "pending",
+      summary: t("doctorSystemScanning"),
+      meta: "-",
+      page: "system",
+      blocking: false,
+    };
+    if (systemLoaded) {
+      const vmpReady = !system.is_windows || featureEnabled(system.virtual_machine_platform);
+      const hypervisorReady = !system.is_windows || system.hypervisor_present !== false;
+      const systemIssue = !system.claude_modern_installer
+        ? t("doctorSystemNeedsModern")
+        : system.reboot_required
+          ? t("doctorSystemNeedsRestart")
+          : !vmpReady
+            ? t("doctorSystemNeedsVmp")
+            : null;
+      systemItem = {
+        ...systemItem,
+        level: systemIssue ? "warn" : "ok",
+        summary: systemIssue || t("doctorSystemReady"),
+        meta: t("doctorSystemMeta", {
+          vmp: formatFeatureState(system.virtual_machine_platform),
+          hypervisor: hypervisorReady ? t("boolYes") : t("boolNo"),
+        }),
+      };
+    }
+
+    let apiItem = {
+      key: "api",
+      prefix: "doctorApi",
+      level: "warn",
+      summary: t("doctorApiMissing"),
+      meta: t("syncCcSwitch"),
+      page: "providers",
+      blocking: true,
+    };
+    if (activeProvider) {
+      const gatewayMode = gateway.enabled ? "Gateway" : t("directModeButton");
+      const openAiDirect = activeProvider.protocol === "openai" && !gateway.enabled;
+      const injectable = canInjectProvider(activeProvider, config.sandbox || {});
+      const summary = !injectable
+        ? t("doctorApiNeedsConfig")
+        : openAiDirect
+          ? t("doctorApiOpenAIDirectWarning")
+          : t("doctorApiReady");
+      apiItem = {
+        ...apiItem,
+        level: injectable && !openAiDirect ? "ok" : "warn",
+        summary: `${activeProvider.name} / ${summary}`,
+        meta: t("doctorApiMeta", {
+          protocol: providerProtocolLabel(activeProvider.protocol),
+          mode: gatewayMode,
+        }),
+        blocking: !injectable,
+      };
+    }
+
+    let pluginItem = {
+      key: "plugins",
+      prefix: "doctorPlugin",
+      level: "pending",
+      summary: t("doctorPluginScanning"),
+      meta: "-",
+      page: "tools",
+      blocking: false,
+    };
+    if (capabilitiesStatus || officialPluginsStatus) {
+      const capabilityReady = Boolean(
+        capabilitiesStatus?.browser_mcp_configured &&
+        capabilitiesStatus?.workspace_mcp_configured &&
+        capabilitiesStatus?.npx_available
+      );
+      const marketplaceReady = Boolean(officialPluginsStatus?.marketplace_configured || pluginCount > 0);
+      pluginItem = {
+        ...pluginItem,
+        level: capabilityReady && marketplaceReady ? "ok" : "warn",
+        summary: capabilityReady && marketplaceReady ? t("doctorPluginReady") : t("doctorPluginNeedsSetup"),
+        meta: t("doctorPluginMeta", { count: pluginCount || "-" }),
+        page: capabilityReady ? "tools" : "capabilities",
+      };
+    }
+
+    const localizationItem = {
+      key: "localization",
+      prefix: "doctorLocalization",
+      level: script?.enabled ? "ok" : "warn",
+      summary: script?.enabled ? t("doctorLocalizationReady") : t("doctorLocalizationMissing"),
+      meta: script?.enabled ? t("localizationResourcePatch") : t("enableChineseLocalization"),
+      page: "tools",
+      blocking: false,
+    };
+
+    let historyItem = {
+      key: "history",
+      prefix: "doctorHistory",
+      level: "pending",
+      summary: t("doctorHistoryScanning"),
+      meta: "-",
+      page: "history",
+      blocking: false,
+    };
+    if (historyLoaded) {
+      historyItem = {
+        ...historyItem,
+        level: recommendedHistory ? "warn" : "ok",
+        summary: recommendedHistory ? t("doctorHistoryRecoverable") : t("doctorHistoryReady"),
+        meta: t("doctorHistoryMeta", { target: state?.history?.target_path || "-" }),
+      };
+    }
+
+    return [installItem, systemItem, apiItem, pluginItem, localizationItem, historyItem];
+  }
+
+  function doctorActionableItems() {
+    return doctorItems().filter((item) => item.level === "err" || item.level === "warn");
+  }
+
+  function doctorPrimaryItem() {
+    const items = doctorActionableItems();
+    return items.find((item) => item.blocking) || null;
+  }
+
+  function renderDoctorReport() {
+    const items = doctorItems();
+    items.forEach((item) => doctorSetCard(item.prefix, item));
+
+    const actionable = items.filter((item) => item.level === "err" || item.level === "warn");
+    const pending = items.filter((item) => item.level === "pending");
+    const first = doctorPrimaryItem() || actionable[0];
+    const verdictBadge = document.getElementById("doctorVerdictBadge");
+    const verdict = document.getElementById("doctorVerdict");
+    const detail = document.getElementById("doctorVerdictDetail");
+    if (verdictBadge && verdict && detail) {
+      const level = first ? first.level : pending.length ? "pending" : "ok";
+      verdictBadge.className = doctorBadgeClass(level);
+      verdictBadge.textContent = doctorBadgeLabel(level);
+      verdict.textContent = first
+        ? t("doctorIssuesVerdict", { count: actionable.length })
+        : pending.length
+          ? t("doctorScanningVerdict")
+          : t("doctorReadyVerdict");
+      detail.textContent = first
+        ? t("doctorIssueDetail", { item: first.summary })
+        : state
+          ? t("doctorReadyDetail")
+          : t("doctorNoState");
+    }
+    renderDoctorQueue(actionable, pending);
+  }
+
+  function renderDoctorQueue(actionable, pending) {
+    const queue = document.getElementById("doctorQueue");
+    if (!queue) return;
+    queue.replaceChildren();
+
+    const rows = actionable.length ? actionable : [];
+    if (!rows.length) {
+      const empty = document.createElement("p");
+      empty.className = "bridge-state";
+      empty.textContent = pending.length ? t("doctorScanningVerdict") : t("doctorQueueEmpty");
+      queue.appendChild(empty);
+      if (!pending.length) {
+        const button = document.createElement("button");
+        button.className = "text-button primary";
+        button.type = "button";
+        button.textContent = t("doctorQueueLaunchReady");
+        button.addEventListener("click", doctorFixAndLaunch);
+        queue.appendChild(button);
+      }
+      return;
+    }
+
+    rows.forEach((item) => {
+      const row = document.createElement("article");
+      row.className = "doctor-queue-item " + (item.level === "err" ? "err" : "warn");
+      const text = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = item.summary;
+      const meta = document.createElement("span");
+      meta.textContent = item.meta || "-";
+      text.append(title, meta);
+
+      const button = document.createElement("button");
+      button.className = "text-button";
+      button.type = "button";
+      button.textContent = t("doctorQueueGo");
+      button.addEventListener("click", () => setPage(item.page));
+      row.append(text, button);
+      queue.appendChild(row);
+    });
+  }
+
+  async function doctorFixAndLaunch() {
+    if (!state) {
+      await refreshState({ silent: true });
+    }
+    if (!overviewDiagnosticsStarted) {
+      await hydrateOverviewDiagnostics();
+    }
+    const first = doctorPrimaryItem();
+    if (first) {
+      setPage(first.page);
+      log("WARN", t("doctorIssueDetail", { item: first.summary }));
+      return;
+    }
+    await handleAction("launchClaudeInjected");
+  }
+
   function renderSystemReadiness() {
     if (!systemLoaded) {
       const value = systemLoading ? t("loading") : "-";
@@ -1548,6 +1941,7 @@
       ].forEach((id) => {
         document.getElementById(id).textContent = value;
       });
+      renderDoctorReport();
       return;
     }
     const system = state?.system || {};
@@ -1567,6 +1961,7 @@
       system.hyper_v ? `Hyper-V: ${formatFeatureState(system.hyper_v)}` : "",
     ].filter(Boolean).join(" / ") || "-";
     document.getElementById("rebootStatus").textContent = system.reboot_required ? t("rebootRequired") : t("rebootNotRequired");
+    renderDoctorReport();
   }
 
   function renderDeveloperCapabilities() {
@@ -1606,6 +2001,7 @@
       item.appendChild(details);
       list.appendChild(item);
     });
+    renderDoctorReport();
   }
 
   function renderCapabilityLog(status) {
@@ -1664,6 +2060,7 @@
       empty.className = "bridge-state";
       empty.textContent = officialPluginsLoading ? t("loading") : t("officialPluginsEmpty");
       list.appendChild(empty);
+      renderDoctorReport();
       return;
     }
     if (!filteredPlugins.length) {
@@ -1671,6 +2068,7 @@
       empty.className = "bridge-state";
       empty.textContent = t("officialPluginsNoResults");
       list.appendChild(empty);
+      renderDoctorReport();
       return;
     }
     visiblePlugins.forEach((plugin) => {
@@ -1714,6 +2112,7 @@
       item.append(details, actions);
       list.appendChild(item);
     });
+    renderDoctorReport();
   }
 
   function filterOfficialPlugins(plugins) {
@@ -2552,6 +2951,7 @@
     badge.classList.toggle("warn", Boolean(script && !script.enabled));
     status.textContent = label;
     runtime.textContent = script?.enabled ? t("localizationResourcePatch") : liveInjectionLabel(lastLaunchResult, state?.install);
+    renderDoctorReport();
   }
 
   async function setChineseLocalization(enabled) {
@@ -2913,6 +3313,30 @@
     }
     if (action === "repairHistoryAuto") {
       await repairHistoryAuto();
+      return;
+    }
+    if (action === "doctorFixAndLaunch") {
+      await doctorFixAndLaunch();
+      return;
+    }
+    if (action === "gotoSystem") {
+      setPage("system");
+      return;
+    }
+    if (action === "gotoProviders") {
+      setPage("providers");
+      return;
+    }
+    if (action === "gotoTools") {
+      setPage("tools");
+      return;
+    }
+    if (action === "gotoHistory") {
+      setPage("history");
+      return;
+    }
+    if (action === "gotoCapabilities") {
+      setPage("capabilities");
       return;
     }
     if (action === "refreshCapabilities") {
