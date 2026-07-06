@@ -39,6 +39,12 @@ ClaudeDesktopPlusPlus 是面向 Claude Desktop 的外部增强启动器和管理
 5. 需要恢复本地记录时，进入「历史对话」点击一键修复。
 6. 需要中文界面时，在顶部点击一键汉化，然后重启 Claude Desktop。
 
+## 开发追踪
+
+项目当前优先打磨 Claude Desktop Doctor & Launcher 的核心体验，推荐页和商业广告位暂不进入主流程。
+
+查看详细规划：[ClaudeDesktopPlusPlus 开发追踪](docs/development-tracking.md)
+
 ## 独家赞助商
 
 <p align="center">
