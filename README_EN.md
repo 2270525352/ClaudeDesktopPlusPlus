@@ -30,19 +30,6 @@ Download the latest installer from [GitHub Releases](https://github.com/22705253
 - macOS Apple Silicon: `ClaudeDesktopPlusPlus-v*-macos-arm64.dmg`
 - macOS Intel: not published yet
 
-## Sponsor
-
-<p align="center">
-  <a href="https://jojocode.com/">
-    <img src="docs/images/sponsor-jojocode.svg" alt="JOJO Code" height="110">
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://jojocode.com/"><strong>JOJO Code | Official Codex++ Relay</strong></a><br>
-  JOJO Code provides affordable and stable Codex API relay access with support for GPT-5.5, GPT-5.4, Claude Opus 4.8, Claude Opus 4.7, gpt-image-2, and image capabilities for daily development, team workflows, and long-running projects.
-</p>
-
 ## Highlights
 
 - Rust backend and Tauri desktop console.
@@ -56,7 +43,7 @@ Download the latest installer from [GitHub Releases](https://github.com/22705253
 - Official plugin directory sync, search, pagination, and installation.
 - One-click Chinese localization.
 - One-click local conversation recovery with backup-first behavior.
-- Sponsor recommendation page and local action feedback dialogs.
+- Local action feedback dialogs.
 
 ## Provider Modes
 

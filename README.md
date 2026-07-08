@@ -41,42 +41,9 @@ ClaudeDesktopPlusPlus 是面向 Claude Desktop 的外部增强启动器和管理
 
 ## 开发追踪
 
-项目当前优先打磨 Claude Desktop Doctor & Launcher 的核心体验，推荐页和商业广告位暂不进入主流程。
+项目当前优先打磨 Claude Desktop Doctor & Launcher 的核心体验，推荐页暂不进入主流程。
 
 查看详细规划：[ClaudeDesktopPlusPlus 开发追踪](docs/development-tracking.md)
-
-## 独家赞助商
-
-<p align="center">
-  <a href="https://jojocode.com/">
-    <img src="docs/images/sponsor-jojocode.svg" alt="JOJO Code" height="110">
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://jojocode.com/"><strong>JOJO Code｜Codex++ 官方中转站</strong></a><br>
-  JOJO Code 是 Codex++ 官方中转站，提供价格划算、稳定易接入的 Codex API 中转服务，支持 GPT-5.5、GPT-5.4、Claude Opus 4.8、Claude Opus 4.7、gpt-image-2 等模型与图像能力，适合日常开发、快速配置、团队协作和长期使用。
-</p>
-
-<table>
-  <tr>
-    <th width="190">🏆 赞助商 🏆</th>
-    <th>介绍</th>
-  </tr>
-  <tr>
-    <td align="center">
-      <a href="https://jojocode.com/">
-        <img src="docs/images/sponsor-jojocode.svg" alt="JOJO Code" height="80">
-      </a>
-    </td>
-    <td>
-      <a href="https://jojocode.com/"><strong>JOJO Code｜Codex++ 官方中转站</strong></a><br>
-      感谢 JOJO Code 赞助本项目。JOJO Code 提供价格划算、稳定易接入的 Codex API 中转服务，支持 GPT-5.5、GPT-5.4、Claude Opus 4.8、Claude Opus 4.7、gpt-image-2 等模型与图像能力，适合日常开发、快速配置、团队协作和长期使用。
-    </td>
-  </tr>
-</table>
-
-想显示在上方？欢迎通过邮箱联系项目维护者：<a href="mailto:2270525352@qq.com">2270525352@qq.com</a>。
 
 ## 交流与支持
 
@@ -104,7 +71,7 @@ ClaudeDesktopPlusPlus 是面向 Claude Desktop 的外部增强启动器和管理
 - 官方插件市场同步，支持搜索、分页加载和安装。
 - 一键汉化，通过资源补丁安装 zh-CN 文案，不默认修改 `app.asar`。
 - 一键修复历史对话，自动选择可恢复来源并先备份当前 Claude-3p 数据。
-- 项目支持信息保留在 README / 关于页，不进入核心使用流程。
+- 项目说明和联系方式保留在 README / 关于页，不进入核心使用流程。
 - 本地日志和状态提示，按钮操作结果会在当前页面即时弹窗展示。
 
 ## 痛点与解决
