@@ -161,6 +161,39 @@
               </div>
               <button class="text-button" type="button" data-action="refreshState" data-i18n="refresh">刷新状态</button>
             </div>
+            <section class="version-panel">
+              <div class="panel-head compact-head">
+                <div>
+                  <p class="eyebrow">VERSION MATRIX</p>
+                  <h3 data-i18n="updatePanelTitle">版本升级</h3>
+                </div>
+                <button class="text-button" type="button" data-action="checkUpdates" data-i18n="checkUpdates">检查更新</button>
+              </div>
+              <div class="version-grid">
+                <article class="version-card">
+                  <div class="version-card-head">
+                    <strong data-i18n="claudeDesktopVersionTitle">Claude Desktop</strong>
+                    <span id="claudeDesktopUpdateState" class="seal">未检查</span>
+                  </div>
+                  <dl class="mini-detail-list">
+                    <div><dt data-i18n="currentVersion">当前版本</dt><dd id="claudeDesktopCurrentVersion">-</dd></div>
+                    <div><dt data-i18n="latestVersion">最新版本</dt><dd id="claudeDesktopLatestVersion">-</dd></div>
+                  </dl>
+                  <button class="text-button primary" type="button" data-action="upgradeClaudeDesktop" data-i18n="upgradeClaudeDesktop">升级 Claude Desktop</button>
+                </article>
+                <article class="version-card">
+                  <div class="version-card-head">
+                    <strong data-i18n="claudePlusVersionTitle">Claude++ 控制台</strong>
+                    <span id="claudePlusUpdateState" class="seal">未检查</span>
+                  </div>
+                  <dl class="mini-detail-list">
+                    <div><dt data-i18n="currentVersion">当前版本</dt><dd id="claudePlusCurrentVersion">-</dd></div>
+                    <div><dt data-i18n="latestVersion">最新版本</dt><dd id="claudePlusLatestVersion">-</dd></div>
+                  </dl>
+                  <button class="text-button" type="button" data-action="upgradeClaudePlus" data-i18n="upgradeClaudePlus">升级 Claude++</button>
+                </article>
+              </div>
+            </section>
             <dl class="detail-list compact">
               <div><dt data-i18n="windowsStatus">Windows 版本</dt><dd id="windowsStatus">-</dd></div>
               <div><dt data-i18n="adminStatus">管理员权限</dt><dd id="adminStatus">-</dd></div>
@@ -472,7 +505,7 @@
               </div>
             </div>
             <dl class="detail-list compact">
-              <div><dt data-i18n="aboutVersion">当前版本</dt><dd id="aboutVersion">0.1.32</dd></div>
+              <div><dt data-i18n="aboutVersion">当前版本</dt><dd id="aboutVersion">-</dd></div>
               <div><dt data-i18n="aboutInstall">安装位置</dt><dd id="aboutInstallPath">-</dd></div>
               <div><dt data-i18n="aboutConfig">配置文件</dt><dd id="aboutConfigPath">-</dd></div>
             </dl>

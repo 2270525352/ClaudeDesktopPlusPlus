@@ -28,14 +28,23 @@ body {
 
 body {
   margin: 0;
-  background:
-    linear-gradient(rgba(4, 14, 16, 0.88), rgba(2, 4, 6, 0.94)),
-    repeating-linear-gradient(90deg, rgba(32, 231, 255, 0.035) 0 1px, transparent 1px 92px),
-    repeating-linear-gradient(0deg, rgba(66, 255, 155, 0.028) 0 1px, transparent 1px 72px),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family: var(--font);
   overflow: hidden;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(0, 3, 4, 0.86), rgba(0, 3, 4, 0.46) 48%, rgba(0, 3, 4, 0.78)),
+    linear-gradient(180deg, rgba(4, 14, 16, 0.52), rgba(2, 4, 6, 0.9)),
+    url("assets/cyber-rose.png") center / cover no-repeat;
+  opacity: 0.72;
 }
 
 button,
@@ -59,7 +68,7 @@ select {
   display: none;
   opacity: 0.1;
   pointer-events: none;
-  z-index: 0;
+  z-index: 1;
 }
 
 .scanline,
@@ -68,7 +77,7 @@ select {
   inset: 0;
   display: none;
   pointer-events: none;
-  z-index: 1;
+  z-index: 2;
 }
 
 .scanline {
@@ -86,7 +95,7 @@ select {
 
 .app-shell {
   position: relative;
-  z-index: 2;
+  z-index: 3;
   display: grid;
   grid-template-columns: 250px minmax(0, 1fr);
   gap: 16px;
@@ -270,6 +279,17 @@ h3 {
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-gutter: stable;
+  background:
+    linear-gradient(90deg, rgba(2, 10, 14, 0.88), rgba(2, 10, 14, 0.72)),
+    url("assets/cyber-rose.png") right center / cover no-repeat;
+}
+
+.panel {
+  background: rgba(5, 13, 17, 0.78);
+}
+
+.sidebar {
+  background: rgba(5, 13, 17, 0.86);
 }
 
 .topbar {
@@ -857,6 +877,63 @@ a.text-button {
 
 .detail-list.compact div {
   grid-template-columns: minmax(120px, 160px) minmax(0, 1fr);
+}
+
+.version-panel {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.compact-head {
+  margin-bottom: 0;
+}
+
+.version-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.version-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(54, 255, 216, 0.22);
+  background: rgba(1, 8, 11, 0.58);
+  box-shadow: inset 0 0 20px rgba(66, 255, 155, 0.04);
+}
+
+.version-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.version-card-head strong {
+  color: var(--green);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.mini-detail-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.mini-detail-list div {
+  display: grid;
+  grid-template-columns: minmax(82px, 112px) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.mini-detail-list dt,
+.mini-detail-list dd {
+  font-size: 11px;
 }
 
 dt {
@@ -1462,6 +1539,10 @@ body.fx-on .led {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .version-grid {
+    grid-template-columns: 1fr;
+  }
+
   .mapping-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1492,6 +1573,7 @@ body.fx-on .led {
   .nav-list,
   .status-grid,
   .doctor-grid,
+  .version-grid,
   .form-grid,
   .sponsor-card,
   .plugin-marketplace-list,

@@ -44,6 +44,12 @@ const CLAUDE_PLUS_CONFIG_NAME: &str = "Claude++ Provider";
 const LEGACY_CLAUDE_PLUS_CONFIG_NAME: &str = "Claude++ Gateway";
 const OFFICIAL_PLUGIN_MARKETPLACE_NAME: &str = "claude-plugins-official";
 const OFFICIAL_PLUGIN_MARKETPLACE_REPO: &str = "anthropics/claude-plugins-official";
+const CLAUDE_DESKTOP_MSIX_REDIRECT_URL: &str =
+    "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect";
+const CLAUDE_PLUS_GITHUB_RELEASE_API: &str =
+    "https://api.github.com/repos/2270525352/ClaudeDesktopPlusPlus/releases/latest";
+const CLAUDE_PLUS_GITHUB_RELEASES_URL: &str =
+    "https://github.com/2270525352/ClaudeDesktopPlusPlus/releases";
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -218,6 +224,7 @@ struct AppState {
     claude_3p: Claude3pStatus,
     system: SystemReadiness,
     history: HistoryScan,
+    app_version: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -292,10 +299,69 @@ struct SystemReadiness {
     claude_installed: bool,
     claude_modern_installer: bool,
     claude_appx_package: Option<String>,
+    claude_version: Option<String>,
     virtual_machine_platform: Option<String>,
     hypervisor_platform: Option<String>,
     hyper_v: Option<String>,
     reboot_required: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdateStatus {
+    claude_desktop: VersionCheck,
+    claude_plus: VersionCheck,
+    checked_at_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct VersionCheck {
+    current_version: Option<String>,
+    latest_version: Option<String>,
+    update_available: bool,
+    download_url: Option<String>,
+    release_url: Option<String>,
+    asset_name: Option<String>,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdateActionResult {
+    ok: bool,
+    exit_code: Option<i32>,
+    message: String,
+    stdout: String,
+    stderr: String,
+    downloaded_path: Option<String>,
+    status: Option<UpdateStatus>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct WindowsReadinessSnapshot {
+    is_admin: Option<bool>,
+    os_name: Option<String>,
+    os_build: Option<String>,
+    virtualization_firmware_enabled: Option<bool>,
+    hypervisor_present: Option<bool>,
+    hypervisor_launch_type: Option<String>,
+    claude_appx_package: Option<String>,
+    claude_version: Option<String>,
+    virtual_machine_platform: Option<String>,
+    hypervisor_platform: Option<String>,
+    hyper_v: Option<String>,
+    reboot_required: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    html_url: String,
+    assets: Vec<GitHubReleaseAsset>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GitHubReleaseAsset {
+    name: String,
+    browser_download_url: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -646,6 +712,7 @@ fn read_app_state() -> Result<AppState, String> {
         claude_3p: claude_3p_status(),
         system: system_readiness_placeholder(install.as_ref()),
         history: history_scan_placeholder(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
     })
 }
 
@@ -660,6 +727,27 @@ async fn system_readiness_status() -> Result<SystemReadiness, String> {
     tauri::async_runtime::spawn_blocking(system_readiness)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn update_status() -> Result<UpdateStatus, String> {
+    tauri::async_runtime::spawn_blocking(update_status_sync)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn upgrade_claude_desktop() -> Result<SystemActionResult, String> {
+    tauri::async_runtime::spawn_blocking(|| install_claude_modern_sync_inner(true))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn upgrade_claude_plus() -> Result<UpdateActionResult, String> {
+    tauri::async_runtime::spawn_blocking(upgrade_claude_plus_sync)
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -766,7 +854,7 @@ if (Test-Path $logPath) {
 Write-Output ($lines -join "`n")
 exit $exitCode
 "#;
-    let output = run_powershell_script(script)?;
+    let output = run_powershell_script_with_timeout(script, Duration::from_secs(600))?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let exit_code = output.status.code();
@@ -802,23 +890,29 @@ async fn install_claude_modern() -> Result<SystemActionResult, String> {
 }
 
 fn install_claude_modern_sync() -> Result<SystemActionResult, String> {
+    install_claude_modern_sync_inner(false)
+}
+
+fn install_claude_modern_sync_inner(force_upgrade: bool) -> Result<SystemActionResult, String> {
     if !cfg!(target_os = "windows") {
         return Err(
             "Claude modern installer automation is only implemented on Windows".to_string(),
         );
     }
 
-    if let Some(package) = claude_appx_package_name() {
-        return Ok(SystemActionResult {
-            ok: true,
-            exit_code: Some(0),
-            message: "Claude Desktop modern package is already installed.".to_string(),
-            stdout: format!("Installed Appx package: {package}"),
-            stderr: String::new(),
-            reboot_required: reboot_required_by_windows(),
-            downloaded_path: None,
-            system: system_readiness(),
-        });
+    if !force_upgrade {
+        if let Some(package) = claude_appx_package_name() {
+            return Ok(SystemActionResult {
+                ok: true,
+                exit_code: Some(0),
+                message: "Claude Desktop modern package is already installed.".to_string(),
+                stdout: format!("Installed Appx package: {package}"),
+                stderr: String::new(),
+                reboot_required: reboot_required_by_windows(),
+                downloaded_path: None,
+                system: system_readiness(),
+            });
+        }
     }
 
     let download_dir = config_path()
@@ -832,7 +926,7 @@ fn install_claude_modern_sync() -> Result<SystemActionResult, String> {
     let script = format!(
         r#"
 $ErrorActionPreference = 'Stop'
-$redirect = 'https://claude.ai/api/desktop/win32/x64/msix/latest/redirect'
+$redirect = '{redirect}'
 $package = '{package}'
 $response = Invoke-WebRequest -Uri $redirect -MaximumRedirection 0 -ErrorAction SilentlyContinue
 $location = $response.Headers.Location
@@ -844,9 +938,10 @@ if (-not $location) {{ throw 'Could not resolve Claude MSIX download URL' }}
 Invoke-WebRequest -Uri $location -OutFile $package -UseBasicParsing
 Add-AppxPackage -Path $package
 Write-Output "Installed Claude modern package from $location"
-"#
+"#,
+        redirect = CLAUDE_DESKTOP_MSIX_REDIRECT_URL
     );
-    let output = run_powershell_script(&script)?;
+    let output = run_powershell_script_with_timeout(&script, Duration::from_secs(600))?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let exit_code = output.status.code();
@@ -854,8 +949,12 @@ Write-Output "Installed Claude modern package from $location"
     Ok(SystemActionResult {
         ok,
         exit_code,
-        message: if ok {
+        message: if ok && force_upgrade {
+            "Claude Desktop upgrade installer completed.".to_string()
+        } else if ok {
             "Claude Desktop modern installer is installed.".to_string()
+        } else if force_upgrade {
+            "Claude Desktop upgrade failed.".to_string()
         } else {
             "Claude Desktop modern installer installation failed.".to_string()
         },
@@ -865,6 +964,268 @@ Write-Output "Installed Claude modern package from $location"
         downloaded_path: Some(path_string(&package_path)),
         system: system_readiness(),
     })
+}
+
+fn update_status_sync() -> Result<UpdateStatus, String> {
+    Ok(UpdateStatus {
+        claude_desktop: check_claude_desktop_update(),
+        claude_plus: check_claude_plus_update(),
+        checked_at_ms: now_millis(),
+    })
+}
+
+fn check_claude_desktop_update() -> VersionCheck {
+    let current_version = claude_desktop_current_version();
+    match resolve_claude_desktop_latest_download() {
+        Ok((download_url, latest_version)) => {
+            let update_available = current_version
+                .as_deref()
+                .zip(latest_version.as_deref())
+                .is_some_and(|(current, latest)| is_version_newer(latest, current));
+            VersionCheck {
+                current_version,
+                latest_version,
+                update_available,
+                download_url: Some(download_url),
+                release_url: Some("https://claude.ai/download".to_string()),
+                asset_name: Some("Claude-modern.msix".to_string()),
+                message: if update_available {
+                    "Claude Desktop update is available.".to_string()
+                } else {
+                    "Claude Desktop is up to date or latest version could not be compared."
+                        .to_string()
+                },
+            }
+        }
+        Err(error) => VersionCheck {
+            current_version,
+            latest_version: None,
+            update_available: false,
+            download_url: None,
+            release_url: Some("https://claude.ai/download".to_string()),
+            asset_name: None,
+            message: format!("Claude Desktop update check failed: {error}"),
+        },
+    }
+}
+
+fn check_claude_plus_update() -> VersionCheck {
+    let current_version = Some(env!("CARGO_PKG_VERSION").to_string());
+    match latest_claude_plus_release() {
+        Ok((release, asset)) => {
+            let latest_version = Some(release.tag_name.trim_start_matches('v').to_string());
+            let update_available = latest_version
+                .as_deref()
+                .is_some_and(|latest| is_version_newer(latest, env!("CARGO_PKG_VERSION")));
+            VersionCheck {
+                current_version,
+                latest_version,
+                update_available,
+                download_url: asset
+                    .as_ref()
+                    .map(|asset| asset.browser_download_url.clone()),
+                release_url: Some(release.html_url),
+                asset_name: asset.map(|asset| asset.name),
+                message: if update_available {
+                    "Claude++ update is available.".to_string()
+                } else {
+                    "Claude++ is up to date.".to_string()
+                },
+            }
+        }
+        Err(error) => VersionCheck {
+            current_version,
+            latest_version: None,
+            update_available: false,
+            download_url: None,
+            release_url: Some(CLAUDE_PLUS_GITHUB_RELEASES_URL.to_string()),
+            asset_name: None,
+            message: format!("Claude++ update check failed: {error}"),
+        },
+    }
+}
+
+fn resolve_claude_desktop_latest_download() -> Result<(String, Option<String>), String> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(20))
+        .redirects(0)
+        .build();
+    let location = match agent.get(CLAUDE_DESKTOP_MSIX_REDIRECT_URL).call() {
+        Ok(response) => response.get_url().to_string(),
+        Err(ureq::Error::Status(status, response)) if (300..400).contains(&status) => response
+            .header("location")
+            .map(ToString::to_string)
+            .ok_or_else(|| format!("redirect returned HTTP {status} without Location header"))?,
+        Err(error) => return Err(error.to_string()),
+    };
+    let version = claude_version_from_download_url(&location);
+    Ok((location, version))
+}
+
+fn latest_claude_plus_release() -> Result<(GitHubRelease, Option<GitHubReleaseAsset>), String> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(20))
+        .build();
+    let release: GitHubRelease = agent
+        .get(CLAUDE_PLUS_GITHUB_RELEASE_API)
+        .set("User-Agent", "ClaudeDesktopPlusPlus")
+        .call()
+        .map_err(|error| error.to_string())?
+        .into_json()
+        .map_err(|error| error.to_string())?;
+    let asset = release
+        .assets
+        .iter()
+        .find(|asset| claude_plus_asset_matches_platform(&asset.name))
+        .cloned();
+    Ok((release, asset))
+}
+
+fn claude_plus_asset_matches_platform(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if cfg!(target_os = "windows") {
+        return lower.contains("windows-x64") && lower.ends_with(".exe");
+    }
+    if cfg!(target_os = "macos") {
+        if cfg!(target_arch = "aarch64") {
+            return lower.contains("macos-arm64") && lower.ends_with(".dmg");
+        }
+        return lower.contains("macos-x64") && lower.ends_with(".dmg");
+    }
+    false
+}
+
+fn upgrade_claude_plus_sync() -> Result<UpdateActionResult, String> {
+    let status = update_status_sync()?;
+    let check = status.claude_plus.clone();
+    if !check.update_available {
+        return Ok(UpdateActionResult {
+            ok: true,
+            exit_code: Some(0),
+            message: check.message,
+            stdout: String::new(),
+            stderr: String::new(),
+            downloaded_path: None,
+            status: Some(status),
+        });
+    }
+    let download_url = check
+        .download_url
+        .clone()
+        .ok_or_else(|| "Claude++ release asset was not found for this platform".to_string())?;
+    let asset_name = check
+        .asset_name
+        .clone()
+        .unwrap_or_else(|| "ClaudeDesktopPlusPlus-update".to_string());
+    let download_path = downloads_dir()?.join(sanitize_download_filename(&asset_name));
+    download_url_to_file(&download_url, &download_path)?;
+    open_downloaded_installer(&download_path)?;
+    Ok(UpdateActionResult {
+        ok: true,
+        exit_code: None,
+        message: "Claude++ installer downloaded and opened. Finish the installer to upgrade."
+            .to_string(),
+        stdout: format!("Downloaded {download_url}"),
+        stderr: String::new(),
+        downloaded_path: Some(path_string(&download_path)),
+        status: Some(status),
+    })
+}
+
+fn downloads_dir() -> Result<PathBuf, String> {
+    let download_dir = config_path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("downloads");
+    fs::create_dir_all(&download_dir).map_err(|error| error.to_string())?;
+    Ok(download_dir)
+}
+
+fn download_url_to_file(url: &str, path: &Path) -> Result<(), String> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(300))
+        .build();
+    let response = agent
+        .get(url)
+        .set("User-Agent", "ClaudeDesktopPlusPlus")
+        .call()
+        .map_err(|error| error.to_string())?;
+    let mut reader = response.into_reader();
+    let mut file = fs::File::create(path).map_err(|error| error.to_string())?;
+    std::io::copy(&mut reader, &mut file).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn open_downloaded_installer(path: &Path) -> Result<(), String> {
+    let mut command = if cfg!(target_os = "windows") {
+        Command::new(path)
+    } else if cfg!(target_os = "macos") {
+        let mut command = Command::new("open");
+        command.arg(path);
+        command
+    } else {
+        return Err("Opening installers is only supported on Windows and macOS".to_string());
+    };
+    hide_child_console(&mut command);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn sanitize_download_filename(name: &str) -> String {
+    name.chars()
+        .map(|ch| match ch {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            _ => ch,
+        })
+        .collect()
+}
+
+fn claude_version_from_download_url(url: &str) -> Option<String> {
+    url.split('/')
+        .find(|segment| is_version_like(segment))
+        .map(ToString::to_string)
+}
+
+fn is_version_like(value: &str) -> bool {
+    value.contains('.')
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_digit() || ch == '.')
+        && value.chars().any(|ch| ch.is_ascii_digit())
+}
+
+fn is_version_newer(candidate: &str, current: &str) -> bool {
+    compare_versions(candidate, current) == std::cmp::Ordering::Greater
+}
+
+fn compare_versions(left: &str, right: &str) -> std::cmp::Ordering {
+    let left_parts = version_parts(left);
+    let right_parts = version_parts(right);
+    let max_len = left_parts.len().max(right_parts.len());
+    for index in 0..max_len {
+        let left_part = *left_parts.get(index).unwrap_or(&0);
+        let right_part = *right_parts.get(index).unwrap_or(&0);
+        match left_part.cmp(&right_part) {
+            std::cmp::Ordering::Equal => {}
+            ordering => return ordering,
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
+fn version_parts(value: &str) -> Vec<u64> {
+    value
+        .trim()
+        .trim_start_matches('v')
+        .split(|ch| ch == '.' || ch == '-' || ch == '_')
+        .filter_map(|part| part.parse::<u64>().ok())
+        .collect()
 }
 
 #[tauri::command]
@@ -3309,24 +3670,98 @@ fn read_json_file(path: &Path) -> anyhow::Result<Value> {
 
 fn system_readiness() -> SystemReadiness {
     let install = detect_claude_install();
+    let windows = windows_readiness_snapshot();
+    let windows_appx_package = windows
+        .as_ref()
+        .and_then(|snapshot| snapshot.claude_appx_package.clone());
     SystemReadiness {
         is_windows: cfg!(target_os = "windows"),
-        is_admin: is_running_as_admin(),
-        os_name: windows_os_caption(),
-        os_build: windows_os_build(),
-        virtualization_firmware_enabled: virtualization_firmware_enabled(),
-        hypervisor_present: hypervisor_present(),
-        hypervisor_launch_type: hypervisor_launch_type(),
+        is_admin: windows
+            .as_ref()
+            .and_then(|snapshot| snapshot.is_admin)
+            .unwrap_or_else(|| {
+                if cfg!(target_os = "windows") {
+                    false
+                } else {
+                    is_running_as_admin()
+                }
+            }),
+        os_name: windows
+            .as_ref()
+            .and_then(|snapshot| snapshot.os_name.clone())
+            .or_else(|| (!cfg!(target_os = "windows")).then(windows_os_caption).flatten()),
+        os_build: windows
+            .as_ref()
+            .and_then(|snapshot| snapshot.os_build.clone())
+            .or_else(|| (!cfg!(target_os = "windows")).then(windows_os_build).flatten()),
+        virtualization_firmware_enabled: windows
+            .as_ref()
+            .and_then(|snapshot| snapshot.virtualization_firmware_enabled)
+            .or_else(|| {
+                (!cfg!(target_os = "windows"))
+                    .then(virtualization_firmware_enabled)
+                    .flatten()
+            }),
+        hypervisor_present: windows
+            .as_ref()
+            .and_then(|snapshot| snapshot.hypervisor_present)
+            .or_else(|| (!cfg!(target_os = "windows")).then(hypervisor_present).flatten()),
+        hypervisor_launch_type: windows
+            .as_ref()
+            .and_then(|snapshot| snapshot.hypervisor_launch_type.clone())
+            .or_else(|| {
+                (!cfg!(target_os = "windows"))
+                    .then(hypervisor_launch_type)
+                    .flatten()
+            }),
         claude_installed: install.is_some(),
         claude_modern_installer: install
             .as_ref()
             .is_some_and(|install| install.app_user_model_id.is_some())
-            || claude_appx_package_name().is_some(),
-        claude_appx_package: claude_appx_package_name(),
-        virtual_machine_platform: windows_feature_state("VirtualMachinePlatform"),
-        hypervisor_platform: windows_feature_state("HypervisorPlatform"),
-        hyper_v: windows_feature_state("Microsoft-Hyper-V-All"),
-        reboot_required: reboot_required_by_windows(),
+            || windows_appx_package.is_some(),
+        claude_appx_package: windows_appx_package,
+        claude_version: windows
+            .as_ref()
+            .and_then(|snapshot| snapshot.claude_version.clone())
+            .or_else(|| {
+                (!cfg!(target_os = "windows"))
+                    .then(claude_desktop_current_version)
+                    .flatten()
+            }),
+        virtual_machine_platform: windows
+            .as_ref()
+            .and_then(|snapshot| snapshot.virtual_machine_platform.clone())
+            .or_else(|| {
+                (!cfg!(target_os = "windows"))
+                    .then(|| windows_feature_state("VirtualMachinePlatform"))
+                    .flatten()
+            }),
+        hypervisor_platform: windows
+            .as_ref()
+            .and_then(|snapshot| snapshot.hypervisor_platform.clone())
+            .or_else(|| {
+                (!cfg!(target_os = "windows"))
+                    .then(|| windows_feature_state("HypervisorPlatform"))
+                    .flatten()
+            }),
+        hyper_v: windows
+            .as_ref()
+            .and_then(|snapshot| snapshot.hyper_v.clone())
+            .or_else(|| {
+                (!cfg!(target_os = "windows"))
+                    .then(|| windows_feature_state("Microsoft-Hyper-V-All"))
+                    .flatten()
+            }),
+        reboot_required: windows
+            .as_ref()
+            .and_then(|snapshot| snapshot.reboot_required)
+            .unwrap_or_else(|| {
+                if cfg!(target_os = "windows") {
+                    false
+                } else {
+                    reboot_required_by_windows()
+                }
+            }),
     }
 }
 
@@ -3342,6 +3777,7 @@ fn system_readiness_placeholder(install: Option<&ClaudeInstall>) -> SystemReadin
         claude_installed: install.is_some(),
         claude_modern_installer: install.is_some_and(|install| install.app_user_model_id.is_some()),
         claude_appx_package: None,
+        claude_version: None,
         virtual_machine_platform: None,
         hypervisor_platform: None,
         hyper_v: None,
@@ -3349,7 +3785,70 @@ fn system_readiness_placeholder(install: Option<&ClaudeInstall>) -> SystemReadin
     }
 }
 
+fn windows_readiness_snapshot() -> Option<WindowsReadinessSnapshot> {
+    if !cfg!(target_os = "windows") {
+        return None;
+    }
+    let script = r#"
+$ErrorActionPreference = 'SilentlyContinue'
+function FeatureState([string]$Name) {
+  try {
+    $state = (Get-WindowsOptionalFeature -Online -FeatureName $Name -ErrorAction Stop).State
+    if ($null -ne $state) { return $state.ToString() }
+  } catch {}
+  return $null
+}
+function BoolValue($Value) {
+  if ($null -eq $Value) { return $null }
+  return [bool]$Value
+}
+$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+$os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+$processor = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
+$computer = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue
+$appx = Get-AppxPackage Claude -ErrorAction SilentlyContinue | Select-Object -First 1
+$hypervisorLine = (bcdedit /enum '{current}' 2>$null | Select-String -Pattern 'hypervisorlaunchtype').Line
+$hypervisorLaunch = $null
+if ($hypervisorLine) { $hypervisorLaunch = ($hypervisorLine -split '\s+')[-1] }
+$rebootKeys = @(
+  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
+  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+)
+$reboot = $false
+foreach ($key in $rebootKeys) {
+  if (Test-Path $key) { $reboot = $true }
+}
+[pscustomobject]@{
+  is_admin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  os_name = $os.Caption
+  os_build = $os.BuildNumber
+  virtualization_firmware_enabled = BoolValue $processor.VirtualizationFirmwareEnabled
+  hypervisor_present = BoolValue $computer.HypervisorPresent
+  hypervisor_launch_type = $hypervisorLaunch
+  claude_appx_package = $appx.PackageFullName
+  claude_version = if ($appx) { $appx.Version.ToString() } else { $null }
+  virtual_machine_platform = FeatureState 'VirtualMachinePlatform'
+  hypervisor_platform = FeatureState 'HypervisorPlatform'
+  hyper_v = FeatureState 'Microsoft-Hyper-V-All'
+  reboot_required = $reboot
+} | ConvertTo-Json -Compress
+"#;
+    let output = run_powershell_script_with_timeout(script, Duration::from_secs(8)).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(raw.trim()).ok()
+}
+
 fn run_powershell_script(script: &str) -> Result<std::process::Output, String> {
+    run_powershell_script_with_timeout(script, Duration::from_secs(45))
+}
+
+fn run_powershell_script_with_timeout(
+    script: &str,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
     let script = format!(
         "$__claudePlusUtf8 = New-Object System.Text.UTF8Encoding $false; \
          [Console]::OutputEncoding = $__claudePlusUtf8; \
@@ -3367,8 +3866,29 @@ fn run_powershell_script(script: &str) -> Result<std::process::Output, String> {
             &script,
         ])
         .stdin(Stdio::null())
-        .output()
-        .map_err(|error| error.to_string())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let started_at = Instant::now();
+    loop {
+        if child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return child.wait_with_output().map_err(|error| error.to_string());
+        }
+        if started_at.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "PowerShell command timed out after {} seconds",
+                timeout.as_secs()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn hide_child_console(command: &mut Command) {
@@ -3401,6 +3921,15 @@ fn claude_appx_package_name() -> Option<String> {
     .ok()?;
     let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
     (!value.is_empty()).then_some(value)
+}
+
+fn claude_desktop_current_version() -> Option<String> {
+    if cfg!(target_os = "windows") {
+        return powershell_trimmed(
+            "Get-AppxPackage Claude | Select-Object -First 1 -ExpandProperty Version",
+        );
+    }
+    None
 }
 
 fn powershell_trimmed(script: &str) -> Option<String> {
@@ -6222,7 +6751,10 @@ fn main() {
             sync_official_plugin_marketplace,
             system_readiness_status,
             test_active_provider,
-            test_provider
+            test_provider,
+            update_status,
+            upgrade_claude_desktop,
+            upgrade_claude_plus
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Claude++ desktop app");

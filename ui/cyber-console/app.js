@@ -44,6 +44,22 @@
       directModeButton: "直连",
       gatewayModeButton: "Gateway",
       systemReadyTitle: "系统就绪检查",
+      updatePanelTitle: "版本升级",
+      checkUpdates: "检查更新",
+      upgradeClaudeDesktop: "升级 Claude Desktop",
+      upgradeClaudePlus: "升级 Claude++",
+      claudeDesktopVersionTitle: "Claude Desktop",
+      claudePlusVersionTitle: "Claude++ 控制台",
+      currentVersion: "当前版本",
+      latestVersion: "最新版本",
+      updateState: "升级状态",
+      updateAvailable: "发现新版本",
+      updateReady: "已是最新",
+      updateUnknown: "未检查",
+      updateChecking: "正在检查更新...",
+      updateActionRunning: "正在下载并启动安装器...",
+      updateActionOk: "升级操作完成：{message}",
+      updateActionFailed: "升级操作失败：{message}",
       windowsStatus: "Windows 版本",
       adminStatus: "管理员权限",
       firmwareVirtualization: "固件虚拟化",
@@ -483,6 +499,22 @@
       directModeButton: "Direct",
       gatewayModeButton: "Gateway",
       systemReadyTitle: "System Readiness",
+      updatePanelTitle: "Version Updates",
+      checkUpdates: "Check Updates",
+      upgradeClaudeDesktop: "Upgrade Claude Desktop",
+      upgradeClaudePlus: "Upgrade Claude++",
+      claudeDesktopVersionTitle: "Claude Desktop",
+      claudePlusVersionTitle: "Claude++ Console",
+      currentVersion: "Current Version",
+      latestVersion: "Latest Version",
+      updateState: "Update State",
+      updateAvailable: "Update available",
+      updateReady: "Up to date",
+      updateUnknown: "Not checked",
+      updateChecking: "Checking updates...",
+      updateActionRunning: "Downloading and opening installer...",
+      updateActionOk: "Update action finished: {message}",
+      updateActionFailed: "Update action failed: {message}",
       windowsStatus: "Windows Version",
       adminStatus: "Administrator",
       firmwareVirtualization: "Firmware Virtualization",
@@ -1161,6 +1193,9 @@
   let capabilitiesLoading = false;
   let officialPluginsStatus = null;
   let officialPluginsLoading = false;
+  let updateStatus = null;
+  let updateLoading = false;
+  let updateActionLoading = false;
   let overviewDiagnosticsStarted = false;
   let overviewDiagnosticsLoading = false;
   let officialPluginSearchQuery = "";
@@ -1480,6 +1515,32 @@
     } finally {
       systemLoading = false;
       renderSystemReadiness();
+    }
+  }
+
+  async function refreshUpdateStatus() {
+    if (updateLoading) return;
+    updateLoading = true;
+    renderVersionUpdates();
+    const logBox = document.getElementById("systemActionLog");
+    if (logBox) {
+      logBox.replaceChildren();
+      const pending = document.createElement("p");
+      pending.textContent = t("updateChecking");
+      logBox.appendChild(pending);
+    }
+    try {
+      await nextFrame();
+      updateStatus = await invoke("update_status");
+      renderVersionUpdates();
+      if (logBox) {
+        renderUpdateLog(updateStatus);
+      }
+    } catch (error) {
+      log("ERR", t("commandFailed", { error: String(error) }));
+    } finally {
+      updateLoading = false;
+      renderVersionUpdates();
     }
   }
 
@@ -1942,6 +2003,7 @@
         document.getElementById(id).textContent = value;
       });
       renderDoctorReport();
+      renderVersionUpdates();
       return;
     }
     const system = state?.system || {};
@@ -1962,6 +2024,61 @@
     ].filter(Boolean).join(" / ") || "-";
     document.getElementById("rebootStatus").textContent = system.reboot_required ? t("rebootRequired") : t("rebootNotRequired");
     renderDoctorReport();
+    renderVersionUpdates();
+  }
+
+  function renderVersionUpdates() {
+    const system = state?.system || {};
+    const desktop = updateStatus?.claude_desktop || {};
+    const plus = updateStatus?.claude_plus || {};
+    setText("claudeDesktopCurrentVersion", desktop.current_version || system.claude_version || "-");
+    setText("claudeDesktopLatestVersion", updateLoading ? t("loading") : desktop.latest_version || "-");
+    setVersionBadge("claudeDesktopUpdateState", desktop, updateLoading);
+    setText("claudePlusCurrentVersion", plus.current_version || state?.app_version || "-");
+    setText("claudePlusLatestVersion", updateLoading ? t("loading") : plus.latest_version || "-");
+    setVersionBadge("claudePlusUpdateState", plus, updateLoading);
+  }
+
+  function setVersionBadge(id, check, loading) {
+    const badge = document.getElementById(id);
+    if (!badge) return;
+    badge.className = "seal";
+    if (loading) {
+      badge.textContent = t("updateChecking");
+      badge.classList.add("warn");
+      return;
+    }
+    if (!check || !check.message) {
+      badge.textContent = t("updateUnknown");
+      return;
+    }
+    if (check.update_available) {
+      badge.textContent = t("updateAvailable");
+      badge.classList.add("warn");
+      return;
+    }
+    badge.textContent = t("updateReady");
+    badge.classList.add("ok");
+  }
+
+  function renderUpdateLog(status) {
+    const logBox = document.getElementById("systemActionLog");
+    if (!logBox) return;
+    logBox.replaceChildren();
+    const lines = [
+      status?.claude_desktop?.message,
+      status?.claude_desktop?.download_url ? `Claude Desktop: ${status.claude_desktop.download_url}` : "",
+      status?.claude_plus?.message,
+      status?.claude_plus?.asset_name ? `Claude++: ${status.claude_plus.asset_name}` : "",
+    ].filter(Boolean);
+    if (!lines.length) {
+      lines.push(t("updateUnknown"));
+    }
+    lines.forEach((line) => {
+      const item = document.createElement("p");
+      item.textContent = line;
+      logBox.appendChild(item);
+    });
   }
 
   function renderDeveloperCapabilities() {
@@ -2232,6 +2349,28 @@
       });
   }
 
+  function renderUpdateAction(result) {
+    const logBox = document.getElementById("systemActionLog");
+    if (!logBox) return;
+    logBox.replaceChildren();
+    [
+      result?.message,
+      result?.downloaded_path ? `Downloaded: ${result.downloaded_path}` : "",
+      result?.stdout,
+      result?.stderr,
+    ]
+      .filter(Boolean)
+      .join("\n")
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .slice(-18)
+      .forEach((line) => {
+        const item = document.createElement("p");
+        item.textContent = line;
+        logBox.appendChild(item);
+      });
+  }
+
   function historyDefaultItems(profile) {
     return (profile?.items || []).filter((entry) => entry.exists && entry.default_restore);
   }
@@ -2408,7 +2547,7 @@
     const aboutVersion = document.getElementById("aboutVersion");
     const aboutInstallPath = document.getElementById("aboutInstallPath");
     const aboutConfigPath = document.getElementById("aboutConfigPath");
-    if (aboutVersion) aboutVersion.textContent = "0.1.32";
+    if (aboutVersion) aboutVersion.textContent = state?.app_version || "-";
     if (aboutInstallPath) aboutInstallPath.textContent = state?.install?.executable || "-";
     if (aboutConfigPath) aboutConfigPath.textContent = state?.config?.config_path || "-";
 
@@ -3153,7 +3292,7 @@
   }
 
   async function runSystemCommand(command) {
-    const buttons = Array.from(document.querySelectorAll(".system-actions .text-button"));
+    const buttons = Array.from(document.querySelectorAll(".system-actions .text-button, .version-panel .text-button"));
     buttons.forEach((button) => {
       button.disabled = true;
     });
@@ -3172,6 +3311,40 @@
       buttons.forEach((button) => {
         button.disabled = false;
       });
+    }
+  }
+
+  async function runUpdateCommand(command) {
+    if (updateActionLoading) return;
+    updateActionLoading = true;
+    const buttons = Array.from(document.querySelectorAll(".system-actions .text-button, .version-panel .text-button"));
+    buttons.forEach((button) => {
+      button.disabled = true;
+    });
+    const logBox = document.getElementById("systemActionLog");
+    if (logBox) {
+      logBox.replaceChildren();
+      const pending = document.createElement("p");
+      pending.textContent = t("updateActionRunning");
+      logBox.appendChild(pending);
+    }
+    try {
+      await nextFrame();
+      const result = await invoke(command);
+      if (result?.status) {
+        updateStatus = result.status;
+        renderVersionUpdates();
+      }
+      renderUpdateAction(result);
+      log(result?.ok ? "OK" : "ERR", result?.ok ? t("updateActionOk", result) : t("updateActionFailed", result || { message: "-" }));
+    } catch (error) {
+      log("ERR", t("commandFailed", { error: String(error) }));
+    } finally {
+      updateActionLoading = false;
+      buttons.forEach((button) => {
+        button.disabled = false;
+      });
+      renderVersionUpdates();
     }
   }
 
@@ -3387,6 +3560,19 @@
     }
     if (action === "installClaudeModern") {
       await runSystemCommand("install_claude_modern");
+      return;
+    }
+    if (action === "checkUpdates") {
+      await refreshUpdateStatus();
+      return;
+    }
+    if (action === "upgradeClaudeDesktop") {
+      await runSystemCommand("upgrade_claude_desktop");
+      await refreshUpdateStatus();
+      return;
+    }
+    if (action === "upgradeClaudePlus") {
+      await runUpdateCommand("upgrade_claude_plus");
       return;
     }
     if (action === "enableVmp") {
