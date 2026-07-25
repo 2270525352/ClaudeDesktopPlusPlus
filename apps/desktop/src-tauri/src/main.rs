@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 use uuid::Uuid;
 
@@ -2036,8 +2036,13 @@ fn launch_claude_plain(
     mode: LaunchMode,
 ) -> anyhow::Result<LaunchedClaude> {
     if let Some(app_user_model_id) = install.app_user_model_id.as_ref() {
-        let process_id =
+        let activation_process_id =
             activate_windows_app(app_user_model_id, "").map_err(|error| anyhow::anyhow!(error))?;
+        let process_id = wait_for_claude_process(
+            install,
+            Some(activation_process_id),
+            Duration::from_secs(15),
+        )?;
         return Ok(LaunchedClaude {
             process_id,
             child: None,
@@ -2085,10 +2090,132 @@ fn launch_claude_plain(
     }
 
     let child = command.spawn()?;
+    let spawned_process_id = child.id();
+    let process_id = wait_for_claude_process(
+        install,
+        Some(spawned_process_id),
+        Duration::from_secs(8),
+    )?;
     Ok(LaunchedClaude {
-        process_id: child.id(),
+        process_id,
         child: Some(child),
     })
+}
+
+fn wait_for_claude_process(
+    install: &ClaudeInstall,
+    preferred_process_id: Option<u32>,
+    timeout: Duration,
+) -> anyhow::Result<u32> {
+    let started_at = Instant::now();
+    while started_at.elapsed() < timeout {
+        if let Some(process_id) = find_running_claude_process_id(install, preferred_process_id) {
+            return Ok(process_id);
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+
+    let activation_hint = preferred_process_id
+        .map(|process_id| process_id.to_string())
+        .unwrap_or_else(|| "-".to_string());
+    Err(anyhow::anyhow!(
+        "Claude Desktop did not start, or it exited before a live claude.exe process could be confirmed. activation/spawn pid: {activation_hint}, install: {}",
+        install.executable.display()
+    ))
+}
+
+fn find_running_claude_process_id(
+    install: &ClaudeInstall,
+    preferred_process_id: Option<u32>,
+) -> Option<u32> {
+    if cfg!(target_os = "windows") {
+        return find_running_claude_process_id_windows(install, preferred_process_id);
+    }
+    if cfg!(target_os = "macos") {
+        return find_running_claude_process_id_macos(preferred_process_id);
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn find_running_claude_process_id_windows(
+    install: &ClaudeInstall,
+    preferred_process_id: Option<u32>,
+) -> Option<u32> {
+    let preferred = preferred_process_id.unwrap_or_default();
+    let executable = path_string(&install.executable);
+    let working_dir = path_string(&install.working_dir);
+    let script = format!(
+        r#"
+$PreferredPid = {preferred}
+$Executable = {executable}
+$WorkingDir = {working_dir}
+$processes = Get-CimInstance Win32_Process -Filter "Name = 'claude.exe'" -ErrorAction SilentlyContinue |
+  Where-Object {{
+    $PathText = if ($_.ExecutablePath) {{ $_.ExecutablePath }} else {{ $_.CommandLine }}
+    $_.ProcessId -eq $PreferredPid -or
+    ($PathText -and (
+      $PathText.IndexOf($Executable, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+      $PathText.IndexOf($WorkingDir, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+      $PathText.IndexOf('\WindowsApps\Claude_', [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+    ))
+  }}
+$preferred = $processes | Where-Object {{ $_.ProcessId -eq $PreferredPid }} | Select-Object -First 1
+if ($preferred) {{ $preferred.ProcessId; exit 0 }}
+$processes | Sort-Object CreationDate -Descending | Select-Object -First 1 -ExpandProperty ProcessId
+"#,
+        preferred = preferred,
+        executable = powershell_single_quoted(&executable),
+        working_dir = powershell_single_quoted(&working_dir)
+    );
+    let output = run_powershell_script(&script).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.trim().parse::<u32>().ok())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn find_running_claude_process_id_windows(
+    _install: &ClaudeInstall,
+    _preferred_process_id: Option<u32>,
+) -> Option<u32> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn find_running_claude_process_id_macos(preferred_process_id: Option<u32>) -> Option<u32> {
+    if let Some(process_id) = preferred_process_id {
+        let status = Command::new("kill")
+            .args(["-0", &process_id.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .ok();
+        if status.is_some_and(|status| status.success()) {
+            return Some(process_id);
+        }
+    }
+    let output = Command::new("pgrep")
+        .args(["-x", "Claude"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.trim().parse::<u32>().ok())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn find_running_claude_process_id_macos(_preferred_process_id: Option<u32>) -> Option<u32> {
+    None
 }
 
 fn launch_arguments(config: &AppConfig, mode: LaunchMode) -> Vec<String> {
