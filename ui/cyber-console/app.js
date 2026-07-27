@@ -71,6 +71,8 @@
       hypervisorStatus: "Hypervisor Platform",
       rebootStatus: "重启需求",
       relaunchAsAdmin: "以管理员重新打开",
+      selectClaudeExecutable: "手动选择 Claude 地址",
+      selectClaudeExecutableOk: "已保存 Claude 地址：{path}",
       installClaudeModern: "一键安装 Claude Desktop",
       enableVmp: "一键启用 VMP",
       systemReadyHint: "Cowork 需要 modern installer、VMP 和一次系统重启。",
@@ -210,6 +212,9 @@
       nextSteps: "下一步",
       syncCcSwitch: "同步 cc-switch 配置",
       syncRunning: "正在同步 cc-switch...",
+      restoreOfficialConfig: "恢复 Claude 官方配置",
+      restoreOfficialConfirm: "将停止 Claude++ Gateway，并移除 Claude++ 写入的 3P 路由。API 列表不会删除。继续吗？",
+      restoreOfficialOk: "已恢复 Claude 官方配置，重新启动 Claude Desktop 后生效",
       fxPerformanceMode: "性能模式",
       fxVisualMode: "视觉模式",
       launchTitle: "启动诊断",
@@ -543,6 +548,8 @@
       hypervisorStatus: "Hypervisor Platform",
       rebootStatus: "Reboot",
       relaunchAsAdmin: "Relaunch as Admin",
+      selectClaudeExecutable: "Select Claude Location",
+      selectClaudeExecutableOk: "Claude location saved: {path}",
       installClaudeModern: "Install Claude Desktop",
       enableVmp: "Enable VMP",
       systemReadyHint: "Cowork needs the modern installer, VMP, and one Windows restart.",
@@ -682,6 +689,9 @@
       nextSteps: "Next Steps",
       syncCcSwitch: "Sync cc-switch Config",
       syncRunning: "Syncing cc-switch...",
+      restoreOfficialConfig: "Restore Official Claude Config",
+      restoreOfficialConfirm: "This stops the Claude++ Gateway and removes 3P routing written by Claude++. Saved API providers are kept. Continue?",
+      restoreOfficialOk: "Official Claude configuration restored. Restart Claude Desktop to apply it.",
       fxPerformanceMode: "Performance Mode",
       fxVisualMode: "Visual Mode",
       launchTitle: "Launch Diagnostics",
@@ -3716,9 +3726,32 @@
       await syncCcSwitchConfig();
       return;
     }
+    if (action === "restoreOfficialConfig") {
+      if (!window.confirm(t("restoreOfficialConfirm"))) {
+        return;
+      }
+      await runCommand("restore_official_claude_config", undefined, async (result) => {
+        state.claude_3p = result.status || state.claude_3p;
+        if (state.config?.gateway) {
+          state.config.gateway.enabled = false;
+        }
+        await refreshGatewayStatus();
+        renderState();
+        log("OK", t("restoreOfficialOk"));
+      });
+      return;
+    }
     if (action === "relaunchAsAdmin") {
       await runCommand("relaunch_as_admin", undefined, () => {
         log("OK", t("adminRelaunchRequested"));
+      });
+      return;
+    }
+    if (action === "selectClaudeExecutable") {
+      await runCommand("select_claude_executable", undefined, (install) => {
+        state.install = install;
+        renderState();
+        log("OK", t("selectClaudeExecutableOk", { path: install.executable }));
       });
       return;
     }
@@ -3828,6 +3861,9 @@
       await runCommand("launch_claude_desktop", undefined, (result) => {
         lastLaunchResult = result;
         state.claude_3p = result.claude_3p || state.claude_3p;
+        if (state.config?.gateway) {
+          state.config.gateway.enabled = false;
+        }
         renderState();
         log("OK", t("launchDone", { pid: result.process_id }));
       });

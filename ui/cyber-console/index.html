@@ -209,6 +209,7 @@
             </dl>
             <div class="button-row system-actions">
               <button class="text-button" type="button" data-action="relaunchAsAdmin" data-i18n="relaunchAsAdmin">以管理员重新打开</button>
+              <button class="text-button" type="button" data-action="selectClaudeExecutable" data-i18n="selectClaudeExecutable">手动选择 Claude 地址</button>
               <button class="text-button primary" type="button" data-action="installClaudeModern" data-i18n="installClaudeModern">一键安装 Claude Desktop</button>
               <button class="text-button" type="button" data-action="enableVmp" data-i18n="enableVmp">一键启用 VMP</button>
             </div>
@@ -396,7 +397,10 @@
                 <p class="eyebrow">CC-SWITCH</p>
                 <h3 data-i18n="ccSwitchImport">同步已有配置</h3>
               </div>
-              <button class="text-button primary" type="button" data-action="syncCcSwitch" data-i18n="syncCcSwitch">同步 cc-switch 配置</button>
+              <div class="button-row">
+                <button class="text-button primary" type="button" data-action="syncCcSwitch" data-i18n="syncCcSwitch">同步 cc-switch 配置</button>
+                <button class="text-button danger" type="button" data-action="restoreOfficialConfig" data-i18n="restoreOfficialConfig">恢复 Claude 官方配置</button>
+              </div>
             </div>
             <dl class="detail-list compact">
               <div><dt data-i18n="ccSwitchRoot">配置目录</dt><dd id="ccSwitchRoot">-</dd></div>

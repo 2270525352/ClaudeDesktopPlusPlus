@@ -67,6 +67,8 @@ ClaudeDesktopPlusPlus（Claude++）是面向 Claude Desktop 的第三方桌面�
 - Claude Desktop 的 Cowork、Code、组织插件等能力仍取决于真实 Claude 登录态和官方策略。
 - 本地插件功能使用 Claude 官方 CLI 和官方插件目录，不等同于组织后台下发的插件。
 - 历史修复会先备份当前目标数据，默认不会复制登录凭据。
+- Windows 卸载程序会自动移除 Claude++ 写入的 3P 路由；也可在「API 配置」中手动恢复 Claude 官方配置。
+- 本次兼容性与卸载恢复改动见 [v0.1.44 修复说明](docs/releases/v0.1.44-fixes.md)。
 
 ## 开发
 

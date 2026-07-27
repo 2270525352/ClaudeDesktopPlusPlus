@@ -2,7 +2,9 @@
 
 use claude_plus_core::asar_patch::{find_app_asar, stage_preload_patch};
 use claude_plus_core::cdp;
-use claude_plus_core::install::{detect_claude_install, ClaudeInstall};
+use claude_plus_core::install::{
+    claude_install_override_file, detect_claude_install, ClaudeInstall,
+};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -571,6 +573,28 @@ struct Claude3pStatus {
     applied: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Claude3pRestoreState {
+    version: u32,
+    desktop_config_existed: bool,
+    desktop_deployment_mode: Option<Value>,
+    meta_existed: bool,
+    meta_applied_id: Option<Value>,
+    meta_is_managed: Option<Value>,
+    meta_platform: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OfficialConfigRestoreResult {
+    ok: bool,
+    removed_config_ids: Vec<String>,
+    restored_previous_selection: bool,
+    desktop_config_path: String,
+    meta_path: String,
+    message: String,
+    status: Claude3pStatus,
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct LaunchVerification {
     gateway_hit: bool,
@@ -698,6 +722,87 @@ impl Default for GatewayConfig {
 #[tauri::command]
 fn detect_install() -> Result<Option<InstallInfo>, String> {
     Ok(detect_claude_install().map(install_info))
+}
+
+#[tauri::command]
+fn select_claude_executable() -> Result<InstallInfo, String> {
+    let selected = select_claude_executable_path()?;
+    if !selected.is_file() {
+        return Err(format!(
+            "Selected Claude executable does not exist: {}",
+            selected.display()
+        ));
+    }
+    let override_file = claude_install_override_file()
+        .ok_or("Claude Desktop path override is not supported on this platform")?;
+    if let Some(parent) = override_file.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::write(&override_file, path_string(&selected)).map_err(|error| error.to_string())?;
+    let install = detect_claude_install().ok_or_else(|| {
+        let _ = fs::remove_file(&override_file);
+        "The selected file could not be validated as a Claude Desktop executable".to_string()
+    })?;
+    Ok(install_info(install))
+}
+
+fn select_claude_executable_path() -> Result<PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = 'Select Claude Desktop executable'
+$dialog.Filter = 'Claude Desktop (Claude.exe)|Claude.exe|Executable files (*.exe)|*.exe'
+$dialog.CheckFileExists = $true
+$dialog.Multiselect = $false
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+  $dialog.FileName
+}
+"#;
+        let output = run_powershell_script_with_timeout(script, Duration::from_secs(300))?;
+        if !output.status.success() {
+            return Err(format_command_failure(&output));
+        }
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.is_empty() {
+            return Err("Claude Desktop selection was cancelled".to_string());
+        }
+        return Ok(PathBuf::from(path));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("osascript")
+            .args([
+                "-e",
+                "set selectedApp to choose application with prompt \"Select Claude Desktop\"",
+                "-e",
+                "POSIX path of selectedApp",
+            ])
+            .stdin(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err("Claude Desktop selection was cancelled".to_string());
+        }
+        let bundle = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        for executable in [
+            bundle.join("Contents").join("MacOS").join("Claude"),
+            bundle.join("Contents").join("MacOS").join("claude"),
+        ] {
+            if executable.is_file() {
+                return Ok(executable);
+            }
+        }
+        return Err("The selected application does not contain a Claude executable".to_string());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        Err("Claude Desktop selection is not supported on this platform".to_string())
+    }
 }
 
 #[tauri::command]
@@ -2271,6 +2376,7 @@ fn upsert_builtin_script(config: &mut AppConfig, id: &str, name: &str, code: &st
 fn launch_claude_desktop() -> Result<LaunchResult, String> {
     let install = detect_claude_install().ok_or("Claude Desktop install was not found")?;
     let config = read_config().map_err(|error| error.to_string())?;
+    let restored = restore_official_claude_config_impl()?;
     terminate_claude_processes().map_err(|error| error.to_string())?;
     let launched = launch_claude_plain(&install, &config, LaunchMode::Clean)
         .map_err(|error| error.to_string())?;
@@ -2291,7 +2397,7 @@ fn launch_claude_desktop() -> Result<LaunchResult, String> {
         cdp_port: None,
         cdp_injected: false,
         cdp_error: None,
-        claude_3p: clear_claude_3p_deployment_mode().ok(),
+        claude_3p: Some(restored.status),
         verification: None,
     })
 }
@@ -2913,6 +3019,7 @@ fn apply_claude_3p_provider_config(config: &AppConfig) -> Result<Claude3pStatus,
     let library_dir = user_data_dir.join(CLAUDE_3P_LIBRARY_DIR);
     let desktop_config_path = user_data_dir.join(CLAUDE_3P_CONFIG_FILE);
     let meta_path = library_dir.join(CLAUDE_3P_META_FILE);
+    capture_claude_3p_restore_state(&desktop_config_path, &meta_path)?;
     fs::create_dir_all(&library_dir).map_err(|error| error.to_string())?;
 
     let config_id =
@@ -2971,17 +3078,251 @@ fn apply_claude_3p_provider_config(config: &AppConfig) -> Result<Claude3pStatus,
     Ok(status)
 }
 
-fn clear_claude_3p_deployment_mode() -> anyhow::Result<Claude3pStatus> {
-    let user_data_dir = claude_3p_user_data_dir().map_err(anyhow::Error::msg)?;
+#[tauri::command]
+fn restore_official_claude_config() -> Result<OfficialConfigRestoreResult, String> {
+    restore_official_claude_config_impl()
+}
+
+fn capture_claude_3p_restore_state(
+    desktop_config_path: &Path,
+    meta_path: &Path,
+) -> Result<(), String> {
+    let state_path = claude_3p_restore_state_path();
+    if state_path.is_file() {
+        return Ok(());
+    }
+
+    let desktop_config = if desktop_config_path.is_file() {
+        Some(read_json_file(desktop_config_path).map_err(|error| error.to_string())?)
+    } else {
+        None
+    };
+    let meta = if meta_path.is_file() {
+        Some(read_json_file(meta_path).map_err(|error| error.to_string())?)
+    } else {
+        None
+    };
+    let owned_ids = meta
+        .as_ref()
+        .map(claude_plus_config_ids)
+        .unwrap_or_default();
+    let previous_applied_id = meta
+        .as_ref()
+        .and_then(|value| value.get("appliedId"))
+        .cloned()
+        .filter(|value| {
+            value
+                .as_str()
+                .is_none_or(|id| !owned_ids.iter().any(|owned| owned == id))
+        });
+    let state = Claude3pRestoreState {
+        version: 1,
+        desktop_config_existed: desktop_config_path.is_file(),
+        desktop_deployment_mode: desktop_config
+            .as_ref()
+            .and_then(|value| value.get("deploymentMode"))
+            .cloned(),
+        meta_existed: meta_path.is_file(),
+        meta_applied_id: previous_applied_id,
+        meta_is_managed: meta
+            .as_ref()
+            .and_then(|value| value.get("isManaged"))
+            .cloned(),
+        meta_platform: meta
+            .as_ref()
+            .and_then(|value| value.get("platform"))
+            .cloned(),
+    };
+    let value = serde_json::to_value(state).map_err(|error| error.to_string())?;
+    write_json_file(&state_path, &value)
+}
+
+fn restore_official_claude_config_impl() -> Result<OfficialConfigRestoreResult, String> {
+    stop_gateway_runtime();
+    let user_data_dir = claude_3p_user_data_dir()?;
     let desktop_config_path = user_data_dir.join(CLAUDE_3P_CONFIG_FILE);
+    let library_dir = user_data_dir.join(CLAUDE_3P_LIBRARY_DIR);
+    let meta_path = library_dir.join(CLAUDE_3P_META_FILE);
+    let state_path = claude_3p_restore_state_path();
+    let restore_state = read_json_file(&state_path)
+        .ok()
+        .and_then(|value| serde_json::from_value::<Claude3pRestoreState>(value).ok());
+
     if desktop_config_path.is_file() {
-        let mut desktop_config = read_json_file(&desktop_config_path).unwrap_or_else(|_| json!({}));
-        if let Some(object) = desktop_config.as_object_mut() {
-            object.remove("deploymentMode");
-            write_json_file(&desktop_config_path, &desktop_config).map_err(anyhow::Error::msg)?;
+        let mut desktop_config =
+            read_json_file(&desktop_config_path).map_err(|error| error.to_string())?;
+        let managed_mode_active = desktop_config
+            .get("deploymentMode")
+            .and_then(Value::as_str)
+            == Some("3p");
+        if managed_mode_active {
+            if let Some(object) = desktop_config.as_object_mut() {
+                restore_json_field(
+                    object,
+                    "deploymentMode",
+                    restore_state
+                        .as_ref()
+                        .and_then(|state| state.desktop_deployment_mode.as_ref()),
+                );
+            }
+            let should_remove = restore_state
+                .as_ref()
+                .is_some_and(|state| !state.desktop_config_existed)
+                && desktop_config
+                    .as_object()
+                    .is_some_and(|object| object.is_empty());
+            if should_remove {
+                fs::remove_file(&desktop_config_path).map_err(|error| error.to_string())?;
+            } else {
+                write_json_file(&desktop_config_path, &desktop_config)?;
+            }
         }
     }
-    Ok(claude_3p_status())
+
+    let mut removed_config_ids = Vec::new();
+    let mut restored_previous_selection = false;
+    if meta_path.is_file() {
+        let mut meta = read_json_file(&meta_path).map_err(|error| error.to_string())?;
+        let (owned_ids, restored) =
+            remove_claude_plus_meta_entries(&mut meta, restore_state.as_ref());
+        restored_previous_selection = restored;
+
+        for id in owned_ids {
+            let path = library_dir.join(format!("{id}.json"));
+            if path.is_file() {
+                fs::remove_file(&path).map_err(|error| error.to_string())?;
+            }
+            removed_config_ids.push(id);
+        }
+
+        let should_remove_meta = restore_state
+            .as_ref()
+            .is_some_and(|state| !state.meta_existed)
+            && meta
+                .get("entries")
+                .and_then(Value::as_array)
+                .is_none_or(|entries| entries.is_empty());
+        if should_remove_meta {
+            fs::remove_file(&meta_path).map_err(|error| error.to_string())?;
+        } else {
+            write_json_file(&meta_path, &meta)?;
+        }
+    }
+
+    if state_path.is_file() {
+        fs::remove_file(&state_path).map_err(|error| error.to_string())?;
+    }
+    if config_path().is_file() {
+        let mut config = read_config().map_err(|error| error.to_string())?;
+        config.gateway.enabled = false;
+        write_config(&config).map_err(|error| error.to_string())?;
+    }
+    let status = claude_3p_status();
+    Ok(OfficialConfigRestoreResult {
+        ok: true,
+        removed_config_ids,
+        restored_previous_selection,
+        desktop_config_path: path_string(&desktop_config_path),
+        meta_path: path_string(&meta_path),
+        message: "Claude++ provider routing was removed. Claude Desktop is restored to its official configuration path.".to_string(),
+        status,
+    })
+}
+
+fn restore_json_field(
+    object: &mut serde_json::Map<String, Value>,
+    key: &str,
+    previous: Option<&Value>,
+) {
+    if let Some(previous) = previous {
+        object.insert(key.to_string(), previous.clone());
+    } else {
+        object.remove(key);
+    }
+}
+
+fn claude_plus_config_ids(meta: &Value) -> Vec<String> {
+    meta.get("entries")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(is_claude_plus_3p_config_name)
+        })
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn remove_claude_plus_meta_entries(
+    meta: &mut Value,
+    restore_state: Option<&Claude3pRestoreState>,
+) -> (Vec<String>, bool) {
+    let owned_ids = claude_plus_config_ids(meta);
+    let applied_owned = meta
+        .get("appliedId")
+        .and_then(Value::as_str)
+        .is_some_and(|id| owned_ids.iter().any(|owned| owned == id));
+
+    if let Some(entries) = meta.get_mut("entries").and_then(Value::as_array_mut) {
+        entries.retain(|entry| {
+            entry
+                .get("name")
+                .and_then(Value::as_str)
+                .is_none_or(|name| !is_claude_plus_3p_config_name(name))
+        });
+    }
+
+    if !applied_owned {
+        return (owned_ids, false);
+    }
+
+    let remaining_ids = meta
+        .get("entries")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+        .map(ToString::to_string)
+        .collect::<HashSet<_>>();
+    let previous_applied = restore_state
+        .and_then(|state| state.meta_applied_id.as_ref())
+        .filter(|value| {
+            value
+                .as_str()
+                .is_some_and(|id| remaining_ids.contains(id))
+        });
+    let mut restored_previous_selection = false;
+    if let Some(object) = meta.as_object_mut() {
+        if let Some(previous_applied) = previous_applied {
+            object.insert("appliedId".to_string(), previous_applied.clone());
+            restored_previous_selection = true;
+        } else {
+            object.remove("appliedId");
+        }
+        restore_json_field(
+            object,
+            "isManaged",
+            restore_state.and_then(|state| state.meta_is_managed.as_ref()),
+        );
+        restore_json_field(
+            object,
+            "platform",
+            restore_state.and_then(|state| state.meta_platform.as_ref()),
+        );
+    }
+    (owned_ids, restored_previous_selection)
+}
+
+fn claude_3p_restore_state_path() -> PathBuf {
+    config_path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("claude-3p-restore.json")
 }
 
 fn build_claude_3p_provider_json(
@@ -3717,7 +4058,7 @@ fn read_claude_3p_deployment_mode() -> Option<String> {
 
 fn read_json_file(path: &Path) -> anyhow::Result<Value> {
     let raw = fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&raw)?)
+    Ok(serde_json::from_str(raw.trim_start_matches('\u{feff}'))?)
 }
 
 fn system_readiness() -> SystemReadiness {
@@ -7070,10 +7411,12 @@ fn main() {
             read_app_state,
             relaunch_as_admin,
             repair_history,
+            restore_official_claude_config,
             save_api_provider,
             save_gateway_options,
             save_sandbox_options,
             save_user_script,
+            select_claude_executable,
             set_active_provider,
             start_gateway,
             stop_gateway,
@@ -7220,6 +7563,25 @@ foreach ($shortcutPath in $shortcutPaths) {{
 
 fn run_headless_command() -> bool {
     let args = std::env::args().collect::<Vec<_>>();
+    if args
+        .iter()
+        .any(|arg| arg == "--claude-plus-restore-official")
+    {
+        match restore_official_claude_config_impl() {
+            Ok(result) => {
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => println!("{json}"),
+                    Err(error) => eprintln!("Failed to encode restore result: {error}"),
+                }
+                let _ = std::io::stdout().flush();
+                return true;
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if args.iter().any(|arg| arg == "--claude-plus-enable-zh-cn") {
         match set_chinese_localization_sync(true) {
             Ok(result) => {
@@ -7274,5 +7636,68 @@ fn run_headless_command() -> bool {
             eprintln!("{error}");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restore_meta_removes_owned_entries_and_restores_previous_selection() {
+        let mut meta = json!({
+            "appliedId": "claude-plus-id",
+            "isManaged": false,
+            "platform": "windows",
+            "entries": [
+                { "id": "official-id", "name": "Official Provider" },
+                { "id": "claude-plus-id", "name": CLAUDE_PLUS_CONFIG_NAME },
+                { "id": "legacy-id", "name": LEGACY_CLAUDE_PLUS_CONFIG_NAME }
+            ]
+        });
+        let state = Claude3pRestoreState {
+            version: 1,
+            desktop_config_existed: true,
+            desktop_deployment_mode: None,
+            meta_existed: true,
+            meta_applied_id: Some(Value::String("official-id".to_string())),
+            meta_is_managed: Some(Value::Bool(true)),
+            meta_platform: Some(Value::String("original".to_string())),
+        };
+
+        let (mut removed, restored) =
+            remove_claude_plus_meta_entries(&mut meta, Some(&state));
+        removed.sort();
+
+        assert_eq!(
+            removed,
+            vec!["claude-plus-id".to_string(), "legacy-id".to_string()]
+        );
+        assert!(restored);
+        assert_eq!(meta["appliedId"], "official-id");
+        assert_eq!(meta["isManaged"], true);
+        assert_eq!(meta["platform"], "original");
+        assert_eq!(meta["entries"].as_array().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn restore_meta_without_snapshot_clears_stale_owned_selection() {
+        let mut meta = json!({
+            "appliedId": "claude-plus-id",
+            "isManaged": false,
+            "platform": "windows",
+            "entries": [
+                { "id": "claude-plus-id", "name": CLAUDE_PLUS_CONFIG_NAME }
+            ]
+        });
+
+        let (removed, restored) = remove_claude_plus_meta_entries(&mut meta, None);
+
+        assert_eq!(removed, vec!["claude-plus-id".to_string()]);
+        assert!(!restored);
+        assert!(meta.get("appliedId").is_none());
+        assert!(meta.get("isManaged").is_none());
+        assert!(meta.get("platform").is_none());
+        assert!(meta["entries"].as_array().is_some_and(Vec::is_empty));
     }
 }

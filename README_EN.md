@@ -67,6 +67,7 @@ After installing `Claude++`:
 - Cowork, Code, organization plugins, and other official features still depend on a real Claude sign-in and Anthropic policy.
 - Local plugin management uses the official Claude CLI and plugin directory. It is separate from organization-managed plugin delivery.
 - Conversation recovery backs up the target profile first and does not copy sign-in credentials by default.
+- The Windows uninstaller removes 3P routing written by Claude++; the same repair is available from **API Config**.
 
 ## Development
 
