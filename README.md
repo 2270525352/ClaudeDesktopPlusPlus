@@ -20,7 +20,7 @@
 
 ClaudeDesktopPlusPlus（Claude++）是面向 Claude Desktop 的第三方桌面增强工具。它把启动、第三方 API、`cc-switch`、插件、汉化、历史修复和系统检查集中到一个控制台中。
 
-> 本项目不是 Anthropic 官方项目，不伪造账号登录，也不绕过官方账号、组织或服务端权益校验。
+解决本地 Gateway 转发带来的能力限制，通过 Claude++ 一键配置第三方 API 直连；在 Claude 账号和系统环境满足要求时，解锁 Cowork 工作流。
 
 ![Claude++ 总览](docs/images/screenshot-overview.png)
 

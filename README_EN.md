@@ -20,7 +20,7 @@
 
 ClaudeDesktopPlusPlus (Claude++) is a third-party desktop companion for Claude Desktop. It brings launching, API providers, `cc-switch`, plugins, localization, conversation recovery, and system diagnostics into one control console.
 
-> This is not an Anthropic project. It does not emulate account sign-in or bypass account, organization, or server-side entitlement checks.
+Move beyond limitations introduced by local Gateway forwarding with one-click direct provider configuration; when Claude account and system requirements are met, unlock the Cowork workflow.
 
 ![Claude++ overview](docs/images/screenshot-overview.png)
 
