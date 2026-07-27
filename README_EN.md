@@ -1,7 +1,7 @@
 # ClaudeDesktopPlusPlus
 
 <p align="center">
-  <img src="docs/images/claude-desktop-plus-plus.png" alt="ClaudeDesktopPlusPlus icon" width="160">
+  <img src="docs/images/claude-desktop-plus-plus.png" alt="ClaudeDesktopPlusPlus icon" width="150">
 </p>
 
 <p align="center">
@@ -12,62 +12,63 @@
   <img alt="Release" src="https://img.shields.io/github/v/release/2270525352/ClaudeDesktopPlusPlus">
   <img alt="Stars" src="https://img.shields.io/github/stars/2270525352/ClaudeDesktopPlusPlus">
   <img alt="License" src="https://img.shields.io/github/license/2270525352/ClaudeDesktopPlusPlus">
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-orange">
-  <img alt="Tauri" src="https://img.shields.io/badge/tauri-2.x-24C8DB">
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-1.85%2B-orange">
+  <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.x-24C8DB">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-x64-0078D4">
   <img alt="macOS" src="https://img.shields.io/badge/macOS-arm64-111111">
 </p>
 
-ClaudeDesktopPlusPlus is an external launcher and management console for Claude Desktop. It helps manage Claude Desktop launch, third-party API providers, cc-switch synchronization, plugin setup, Chinese localization, conversation recovery, and system readiness checks from a dedicated Tauri desktop app.
+ClaudeDesktopPlusPlus (Claude++) is a third-party desktop companion for Claude Desktop. It brings launching, API providers, `cc-switch`, plugins, localization, conversation recovery, and system diagnostics into one control console.
 
-> This project is not affiliated with Anthropic. Claude Desktop, Claude, Claude Code, Cowork, and related names belong to their respective owners. Use this tool only on machines and profiles you are allowed to manage.
+> This is not an Anthropic project. It does not emulate account sign-in or bypass account, organization, or server-side entitlement checks.
 
-## Downloads
-
-Download the latest installer from [GitHub Releases](https://github.com/2270525352/ClaudeDesktopPlusPlus/releases):
-
-- Windows: `ClaudeDesktopPlusPlus-v*-windows-x64-setup.exe`
-- macOS Apple Silicon: `ClaudeDesktopPlusPlus-v*-macos-arm64.dmg`
-- macOS Intel: not published yet
+![Claude++ overview](docs/images/screenshot-overview.png)
 
 ## Highlights
 
-- Rust backend and Tauri desktop console.
-- Chinese-first UI with English switching.
-- cc-switch provider synchronization and stale entry cleanup.
-- Anthropic-compatible and OpenAI / Codex-compatible provider management.
-- Direct mode and local Gateway mode.
-- Model discovery, mapping hints, and credential checks.
-- One-click Claude Desktop launch with Windows MSIX / modern installer detection.
-- System readiness checks for Claude installation, VMP, Hypervisor, and reboot state.
-- Official plugin directory sync, search, pagination, and installation.
-- Built-in Broken Skills Pack with 17 Claude Code skills, one-click install, update, and backup.
-- One-click Chinese localization.
-- One-click local conversation recovery with backup-first behavior.
-- Local action feedback dialogs.
+- Sync `cc-switch` and manage Anthropic or OpenAI / Codex compatible APIs.
+- Switch between direct and local Gateway modes with credential tests and model discovery.
+- Detect and launch Claude Desktop; check Modern Installer, VMP, and Hypervisor readiness.
+- Sync, search, and install plugins from the official Claude plugin directory.
+- Install or update the Built-in Broken Skills Pack with 17 Claude Code skills.
+- Apply Chinese localization and recover local conversations after account or provider changes.
+- Chinese and English UI, system tray support, silent command execution, and update checks.
 
-## Provider Modes
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/screenshot-api-config.png" alt="API configuration"></td>
+    <td width="50%"><img src="docs/images/screenshot-plugins.png" alt="Plugins and built-in skills"></td>
+  </tr>
+  <tr>
+    <td align="center">API providers and cc-switch sync</td>
+    <td align="center">Plugins, localization, and built-in skills</td>
+  </tr>
+</table>
 
-Anthropic-compatible providers usually work best with Direct mode.
+## Download
 
-OpenAI / Codex-compatible providers often expose `/v1/models`, `/v1/chat/completions`, or similar routes. To use them directly in Claude Desktop, the upstream platform must map Claude model names to real upstream models, for example:
+Get the latest build from [GitHub Releases](https://github.com/2270525352/ClaudeDesktopPlusPlus/releases):
 
-```text
-claude-opus-4-5   -> gpt-5.5
-claude-sonnet-4-5 -> gpt-5.4
-claude-haiku-4-5  -> gpt-5.4-mini
-```
+- Windows x64: `ClaudeDesktopPlusPlus-*-windows-x64-setup.exe`
+- macOS Apple Silicon: `ClaudeDesktopPlusPlus-*-macos-arm64-*.dmg`
+- macOS Intel: not published yet
 
-If your provider does not support this kind of direct model mapping, use Gateway mode.
+After installing `Claude++`:
+
+1. Check Claude Desktop under **System Ready**.
+2. Sync or add a provider under **API Config**.
+3. Test credentials, then choose Direct or Gateway mode.
+4. Install the plugins and skills you need under **Plugins**.
+
+## Notes
+
+- Anthropic-compatible providers can usually use Direct mode.
+- Direct mode for OpenAI / Codex providers requires Claude-compatible protocol handling and model mapping upstream; otherwise use Gateway.
+- Cowork, Code, organization plugins, and other official features still depend on a real Claude sign-in and Anthropic policy.
+- Local plugin management uses the official Claude CLI and plugin directory. It is separate from organization-managed plugin delivery.
+- Conversation recovery backs up the target profile first and does not copy sign-in credentials by default.
 
 ## Development
-
-```powershell
-node --check ui\cyber-console\app.js
-cargo +stable-x86_64-pc-windows-gnullvm check --target x86_64-pc-windows-gnullvm -q
-```
-
-Run the desktop app in development:
 
 ```powershell
 cd apps/desktop
@@ -75,20 +76,24 @@ npm install
 npm run dev
 ```
 
-Build installers:
+Check and build:
 
 ```powershell
+node --check ui\cyber-console\app.js
+cargo +stable-x86_64-pc-windows-gnullvm test --target x86_64-pc-windows-gnullvm -q
 cd apps/desktop
 npm run bundle
 ```
 
-## Links
+See [development tracking](docs/development-tracking.md) for current work.
 
-- Releases: <https://github.com/2270525352/ClaudeDesktopPlusPlus/releases>
-- Issues: <https://github.com/2270525352/ClaudeDesktopPlusPlus/issues>
+## Feedback
+
+- [Issues](https://github.com/2270525352/ClaudeDesktopPlusPlus/issues)
+- [Releases](https://github.com/2270525352/ClaudeDesktopPlusPlus/releases)
 - Email: <a href="mailto:2270525352@qq.com">2270525352@qq.com</a>
-- Codex++: <https://github.com/BigPizzaV3/CodexPlusPlus>
+- Reference project: [Codex++](https://github.com/BigPizzaV3/CodexPlusPlus)
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+[MIT License](LICENSE)
