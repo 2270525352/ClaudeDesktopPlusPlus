@@ -132,6 +132,23 @@
       capabilityNpx: "插件运行时",
       capabilityWorkspace: "默认工作区",
       capabilityConfigTargets: "能力安装位置",
+      builtinSkillsTitle: "内置broken技能包",
+      builtinSkillsInstall: "一键安装技能包",
+      builtinSkillsUpdate: "更新技能包",
+      builtinSkillsRefresh: "刷新状态",
+      builtinSkillsPackVersion: "内置版本",
+      builtinSkillsStatus: "安装状态",
+      builtinSkillsCount: "技能数量",
+      builtinSkillsPath: "安装目录",
+      builtinSkillsReady: "已安装",
+      builtinSkillsMissing: "未安装",
+      builtinSkillsPartial: "需要更新",
+      builtinSkillsInstalling: "正在安装内置broken技能包...",
+      builtinSkillsInstallOk: "内置broken技能包安装完成：{count} 个技能",
+      builtinSkillsInstallFailed: "内置broken技能包安装失败：{error}",
+      builtinSkillsHint: "安装到 ~/.claude/skills；同名技能会先备份，安装过程不会执行包内脚本。首次安装后请重启 Claude Code。",
+      builtinSkillsInstalledCount: "{installed} / {total}",
+      builtinSkillsBackup: "原技能备份：{path}",
       officialPluginsTitle: "官方插件市场",
       officialPluginsSync: "同步官方目录",
       officialPluginsInstall: "安装",
@@ -587,6 +604,23 @@
       capabilityNpx: "Plugin Runtime",
       capabilityWorkspace: "Default Workspace",
       capabilityConfigTargets: "Capability Install Locations",
+      builtinSkillsTitle: "Built-in Broken Skills Pack",
+      builtinSkillsInstall: "Install Skills Pack",
+      builtinSkillsUpdate: "Update Skills Pack",
+      builtinSkillsRefresh: "Refresh Status",
+      builtinSkillsPackVersion: "Pack Version",
+      builtinSkillsStatus: "Install Status",
+      builtinSkillsCount: "Skill Count",
+      builtinSkillsPath: "Install Path",
+      builtinSkillsReady: "Installed",
+      builtinSkillsMissing: "Not Installed",
+      builtinSkillsPartial: "Update Required",
+      builtinSkillsInstalling: "Installing the Built-in Broken Skills Pack...",
+      builtinSkillsInstallOk: "Built-in Broken Skills Pack installed: {count}",
+      builtinSkillsInstallFailed: "Built-in Broken Skills Pack installation failed: {error}",
+      builtinSkillsHint: "Installs to ~/.claude/skills. Existing skills with the same names are backed up first, package scripts are not executed during installation, and Claude Code should be restarted after the first install.",
+      builtinSkillsInstalledCount: "{installed} / {total}",
+      builtinSkillsBackup: "Previous skills backup: {path}",
       officialPluginsTitle: "Official Plugin Marketplace",
       officialPluginsSync: "Sync Official Directory",
       officialPluginsInstall: "Install",
@@ -1191,6 +1225,8 @@
   let historyLoading = false;
   let capabilitiesStatus = null;
   let capabilitiesLoading = false;
+  let builtinSkillsStatus = null;
+  let builtinSkillsLoading = false;
   let officialPluginsStatus = null;
   let officialPluginsLoading = false;
   let updateStatus = null;
@@ -1411,6 +1447,7 @@
     }
     if (page === "tools") {
       renderLocalizationStatus();
+      renderBuiltinSkills();
       renderOfficialPlugins();
     }
   }
@@ -1457,8 +1494,11 @@
     if (page === "capabilities" && (force || !capabilitiesStatus)) {
       await refreshDeveloperCapabilities();
     }
-    if (page === "tools" && (force || !officialPluginsStatus)) {
-      await refreshOfficialPlugins();
+    if (page === "tools") {
+      const tasks = [];
+      if (force || !builtinSkillsStatus) tasks.push(refreshBuiltinSkills());
+      if (force || !officialPluginsStatus) tasks.push(refreshOfficialPlugins());
+      await Promise.allSettled(tasks);
     }
   }
 
@@ -1602,6 +1642,50 @@
     } finally {
       capabilitiesLoading = false;
       renderDeveloperCapabilities();
+    }
+  }
+
+  async function refreshBuiltinSkills() {
+    if (builtinSkillsLoading) return;
+    builtinSkillsLoading = true;
+    renderBuiltinSkills();
+    try {
+      await nextFrame();
+      const status = await invoke("builtin_skills_status");
+      if (!status) return;
+      builtinSkillsStatus = status;
+      renderBuiltinSkills();
+    } catch (error) {
+      log("ERR", t("commandFailed", { error: String(error) }));
+    } finally {
+      builtinSkillsLoading = false;
+      renderBuiltinSkills();
+    }
+  }
+
+  async function installBuiltinSkills() {
+    if (builtinSkillsLoading) return;
+    builtinSkillsLoading = true;
+    renderBuiltinSkills();
+    showNotice("WARN", t("builtinSkillsInstalling"));
+    try {
+      await nextFrame();
+      const result = await invoke("install_builtin_skills");
+      if (!result) return;
+      builtinSkillsStatus = result.status;
+      renderBuiltinSkills();
+      renderBuiltinSkillsLog(result);
+      log(
+        result.ok ? "OK" : "ERR",
+        result.ok
+          ? t("builtinSkillsInstallOk", { count: result.status?.installed_count || 0 })
+          : t("builtinSkillsInstallFailed", { error: result.message })
+      );
+    } catch (error) {
+      log("ERR", t("builtinSkillsInstallFailed", { error: String(error) }));
+    } finally {
+      builtinSkillsLoading = false;
+      renderBuiltinSkills();
     }
   }
 
@@ -2138,6 +2222,79 @@
         item.textContent = line;
         logBox.appendChild(item);
       });
+  }
+
+  function renderBuiltinSkills() {
+    const status = builtinSkillsStatus;
+    const loading = builtinSkillsLoading ? t("loading") : "-";
+    setText("builtinSkillsVersion", status?.pack_version || loading);
+    setText(
+      "builtinSkillsCount",
+      status
+        ? t("builtinSkillsInstalledCount", {
+            installed: status.installed_count || 0,
+            total: status.packaged_count || 0,
+          })
+        : loading
+    );
+    setText("builtinSkillsPath", status?.install_path || loading);
+
+    const stateText = status
+      ? status.installed
+        ? t("builtinSkillsReady")
+        : status.installed_count
+          ? t("builtinSkillsPartial")
+          : t("builtinSkillsMissing")
+      : loading;
+    setText("builtinSkillsState", stateText);
+    const badge = document.getElementById("builtinSkillsBadge");
+    if (badge) {
+      badge.textContent = stateText;
+      badge.className = "seal";
+      badge.classList.add(status?.installed ? "ok" : "warn");
+    }
+
+    const installButton = document.getElementById("builtinSkillsInstallButton");
+    if (installButton) {
+      installButton.disabled = builtinSkillsLoading;
+      installButton.textContent = status?.installed_count
+        ? t("builtinSkillsUpdate")
+        : t("builtinSkillsInstall");
+    }
+
+    const list = document.getElementById("builtinSkillsList");
+    if (!list) return;
+    list.replaceChildren();
+    const skills = status?.skills || [];
+    if (!skills.length) {
+      const empty = document.createElement("span");
+      empty.className = "bridge-state";
+      empty.textContent = loading;
+      list.appendChild(empty);
+      return;
+    }
+    skills.forEach((skill) => {
+      const item = document.createElement("span");
+      item.className = "skill-pack-item";
+      item.classList.toggle("installed", Boolean(skill.installed));
+      item.textContent = skill.name;
+      list.appendChild(item);
+    });
+  }
+
+  function renderBuiltinSkillsLog(result) {
+    const logBox = document.getElementById("builtinSkillsActionLog");
+    if (!logBox) return;
+    logBox.replaceChildren();
+    const lines = [
+      result.message,
+      result.backup_path ? t("builtinSkillsBackup", { path: result.backup_path }) : "",
+    ].filter(Boolean);
+    lines.forEach((line) => {
+      const item = document.createElement("p");
+      item.textContent = line;
+      logBox.appendChild(item);
+    });
   }
 
   function renderOfficialPlugins() {
@@ -2786,14 +2943,13 @@
     const configGateway = state.config.gateway || { enabled: true, port: 49331 };
     const gatewayEffective = Boolean(gateway?.enabled ?? configGateway.enabled);
     const fallbackUrl = `http://127.0.0.1:${configGateway.port || 49331}`;
-    const summary = document.getElementById("gatewaySummary");
     const url = gateway?.url || fallbackUrl;
     if (!gatewayEffective) {
-      summary.textContent = t("direct3pMode");
+      setText("gatewaySummary", t("direct3pMode"));
     } else if (gateway?.running) {
-      summary.textContent = t("gatewayRunning", { url });
+      setText("gatewaySummary", t("gatewayRunning", { url }));
     } else {
-      summary.textContent = t("gatewayStopped");
+      setText("gatewaySummary", t("gatewayStopped"));
     }
     setText("gatewayUrl", gatewayEffective ? url : t("direct3pMode"));
     setText("gatewayTarget", gateway?.target_base_url || "-");
@@ -3518,6 +3674,14 @@
     }
     if (action === "refreshOfficialPlugins") {
       await refreshOfficialPlugins();
+      return;
+    }
+    if (action === "refreshBuiltinSkills") {
+      await refreshBuiltinSkills();
+      return;
+    }
+    if (action === "installBuiltinSkills") {
+      await installBuiltinSkills();
       return;
     }
     if (action === "enableDeveloperCapabilities") {

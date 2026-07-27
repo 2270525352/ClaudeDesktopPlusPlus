@@ -28,26 +28,78 @@ if (process.platform === "win32") {
 }
 
 const tauriCli = join(appRoot, "node_modules", "@tauri-apps", "cli", "tauri.js");
-const child = spawn(process.execPath, [tauriCli, ...args], {
-  cwd: appRoot,
-  env,
-  shell: false,
-  stdio: "inherit",
-});
+const target = readTarget(args);
+const isLlvmMingwTarget =
+  process.platform === "win32" &&
+  target === "x86_64-pc-windows-gnullvm" &&
+  Boolean(llvmMingwBin);
+let exitCode;
 
-child.on("exit", (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
+if (isLlvmMingwTarget && command === "build" && !args.includes("--no-bundle")) {
+  exitCode = await runTauri([...args, "--no-bundle"]);
+  if (exitCode === 0) {
+    copyWindowsRuntimeDlls(llvmMingwBin, target);
+    exitCode = await runTauri([
+      "bundle",
+      "--target",
+      target,
+      "--config",
+      join(appRoot, "src-tauri", "tauri.gnullvm.conf.json"),
+    ]);
   }
-  if (code === 0 && process.platform === "win32" && command === "build" && llvmMingwBin) {
-    copyWindowsRuntimeDlls(llvmMingwBin);
+} else {
+  if (isLlvmMingwTarget && command === "bundle") {
+    copyWindowsRuntimeDlls(llvmMingwBin, target);
+    args.push(
+      "--config",
+      join(appRoot, "src-tauri", "tauri.gnullvm.conf.json"),
+    );
   }
-  process.exit(code ?? 1);
-});
+
+  exitCode = await runTauri(args);
+  if (exitCode === 0 && isLlvmMingwTarget && command === "build") {
+    copyWindowsRuntimeDlls(llvmMingwBin, target);
+  }
+}
+
+process.exit(exitCode);
 
 function hasTargetArg(values) {
   return values.some((value) => value === "--target" || value === "-t" || value.startsWith("--target="));
+}
+
+function readTarget(values) {
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+    if (value === "--target" || value === "-t") {
+      return values[index + 1];
+    }
+    if (value.startsWith("--target=")) {
+      return value.slice("--target=".length);
+    }
+  }
+  return undefined;
+}
+
+function runTauri(cliArgs) {
+  return new Promise((resolveExit) => {
+    const child = spawn(process.execPath, [tauriCli, ...cliArgs], {
+      cwd: appRoot,
+      env,
+      shell: false,
+      stdio: "inherit",
+    });
+
+    child.on("error", () => resolveExit(1));
+    child.on("exit", (code, signal) => {
+      if (signal) {
+        process.kill(process.pid, signal);
+        resolveExit(1);
+        return;
+      }
+      resolveExit(code ?? 1);
+    });
+  });
 }
 
 function findLlvmMingwBin() {
@@ -78,16 +130,22 @@ function findLlvmMingwBin() {
   return undefined;
 }
 
-function copyWindowsRuntimeDlls(bin) {
-  const releaseDir = join(appRoot, "src-tauri", "target", "x86_64-pc-windows-gnullvm", "release");
+function copyWindowsRuntimeDlls(bin, targetTriple) {
+  const releaseDir = join(appRoot, "src-tauri", "target", targetTriple, "release");
   if (!existsSync(releaseDir)) {
-    return;
+    throw new Error(`Release directory not found: ${releaseDir}`);
   }
 
   for (const fileName of ["libunwind.dll"]) {
     const source = join(bin, fileName);
     if (existsSync(source)) {
       copyFileSync(source, join(releaseDir, fileName));
+    }
+  }
+
+  for (const fileName of ["WebView2Loader.dll", "libunwind.dll"]) {
+    if (!existsSync(join(releaseDir, fileName))) {
+      throw new Error(`Required Windows runtime is missing: ${fileName}`);
     }
   }
 }

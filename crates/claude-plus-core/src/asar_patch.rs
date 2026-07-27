@@ -327,6 +327,7 @@ mod tests {
             executable: PathBuf::from(r"C:\Users\me\AppData\Local\AnthropicClaude\claude.exe"),
             working_dir: PathBuf::from(r"C:\Users\me\AppData\Local\AnthropicClaude\app-1.2.3"),
             source: "test",
+            app_user_model_id: None,
         };
         let candidates = candidate_app_asar_paths(&install);
         assert!(candidates
@@ -337,6 +338,7 @@ mod tests {
             executable: PathBuf::from("/Applications/Claude.app/Contents/MacOS/Claude"),
             working_dir: PathBuf::from("/Applications/Claude.app/Contents/MacOS"),
             source: "test",
+            app_user_model_id: None,
         };
         let candidates = candidate_app_asar_paths(&install);
         assert!(candidates

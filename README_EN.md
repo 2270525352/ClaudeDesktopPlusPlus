@@ -41,6 +41,7 @@ Download the latest installer from [GitHub Releases](https://github.com/22705253
 - One-click Claude Desktop launch with Windows MSIX / modern installer detection.
 - System readiness checks for Claude installation, VMP, Hypervisor, and reboot state.
 - Official plugin directory sync, search, pagination, and installation.
+- Built-in Broken Skills Pack with 17 Claude Code skills, one-click install, update, and backup.
 - One-click Chinese localization.
 - One-click local conversation recovery with backup-first behavior.
 - Local action feedback dialogs.

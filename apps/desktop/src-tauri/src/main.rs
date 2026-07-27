@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use std::net::TcpListener;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -17,6 +17,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tauri::Manager;
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 use uuid::Uuid;
 
@@ -25,6 +26,9 @@ const CHINESE_LOCALIZATION_SCRIPT: &str =
     include_str!("../../../../assets/inject/chinese-localization.js");
 const CHINESE_LOCALIZATION_SCRIPT_ID: &str = "builtin-chinese-localization";
 const CHINESE_LOCALIZATION_SCRIPT_NAME: &str = "Chinese Localization";
+const BUILTIN_SKILLS_ARCHIVE: &[u8] =
+    include_bytes!("../../../../assets/skills/builtin-skills.zip");
+const BUILTIN_SKILLS_VERSION: &str = "2026.07.27";
 const LOCALIZATION_DESKTOP_ZH_CN: &str =
     include_str!("../../../../assets/localization/zh-CN/zh-CN.json");
 const LOCALIZATION_FRONTEND_ZH_CN: &str =
@@ -275,6 +279,40 @@ struct OfficialPluginActionResult {
     stdout: String,
     stderr: String,
     status: OfficialPluginsStatus,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BuiltinSkillEntry {
+    name: String,
+    installed: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct BuiltinSkillsStatus {
+    pack_version: String,
+    installed_version: Option<String>,
+    packaged_count: usize,
+    installed_count: usize,
+    installed: bool,
+    update_available: bool,
+    install_path: String,
+    skills: Vec<BuiltinSkillEntry>,
+}
+
+#[derive(Debug, Serialize)]
+struct BuiltinSkillsInstallResult {
+    ok: bool,
+    installed_files: usize,
+    backup_path: Option<String>,
+    message: String,
+    status: BuiltinSkillsStatus,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BuiltinSkillsMarker {
+    version: String,
+    installed_at_ms: u128,
+    skills: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -769,6 +807,20 @@ async fn official_plugins_status() -> Result<OfficialPluginsStatus, String> {
     tauri::async_runtime::spawn_blocking(official_plugins_status_sync)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn builtin_skills_status() -> Result<BuiltinSkillsStatus, String> {
+    tauri::async_runtime::spawn_blocking(builtin_skills_status_sync)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn install_builtin_skills() -> Result<BuiltinSkillsInstallResult, String> {
+    tauri::async_runtime::spawn_blocking(install_builtin_skills_sync)
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -5967,6 +6019,270 @@ fn merge_developer_capability_config(path: &Path, workspace: &Path) -> Result<()
     write_json_file(path, &value)
 }
 
+fn builtin_skills_status_sync() -> Result<BuiltinSkillsStatus, String> {
+    let names = builtin_skill_names()?;
+    let install_root = claude_skills_root();
+    let marker = read_json_file(&builtin_skills_marker_path())
+        .ok()
+        .and_then(|value| serde_json::from_value::<BuiltinSkillsMarker>(value).ok());
+    let installed_version = marker.as_ref().map(|marker| marker.version.clone());
+    let skills = names
+        .iter()
+        .map(|name| BuiltinSkillEntry {
+            name: name.clone(),
+            installed: install_root.join(name).join("SKILL.md").is_file(),
+        })
+        .collect::<Vec<_>>();
+    let installed_count = skills.iter().filter(|skill| skill.installed).count();
+    let all_present = installed_count == names.len();
+    let installed = all_present
+        && installed_version
+            .as_deref()
+            .is_some_and(|version| version == BUILTIN_SKILLS_VERSION);
+
+    Ok(BuiltinSkillsStatus {
+        pack_version: BUILTIN_SKILLS_VERSION.to_string(),
+        installed_version,
+        packaged_count: names.len(),
+        installed_count,
+        installed,
+        update_available: installed_count > 0 && !installed,
+        install_path: path_string(&install_root),
+        skills,
+    })
+}
+
+fn install_builtin_skills_sync() -> Result<BuiltinSkillsInstallResult, String> {
+    let names = builtin_skill_names()?;
+    let name_set = names.iter().cloned().collect::<HashSet<_>>();
+    let app_data = config_path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let staging_parent = app_data.join("skill-install-staging");
+    let staging_root = staging_parent.join(Uuid::new_v4().to_string());
+    fs::create_dir_all(&staging_root).map_err(|error| error.to_string())?;
+
+    let installed_files = match extract_builtin_skills(&staging_root, &name_set) {
+        Ok(count) => count,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&staging_root);
+            return Err(error);
+        }
+    };
+
+    for name in &names {
+        if !staging_root.join(name).join("SKILL.md").is_file() {
+            let _ = fs::remove_dir_all(&staging_root);
+            return Err(format!("Built-in skill is missing SKILL.md: {name}"));
+        }
+    }
+
+    let install_root = claude_skills_root();
+    fs::create_dir_all(&install_root).map_err(|error| error.to_string())?;
+    let backup_root = app_data
+        .join("skill-backups")
+        .join(format!("builtin-{}", unix_millis()));
+    let mut backed_up = Vec::new();
+    let mut installed_names = Vec::new();
+
+    for name in &names {
+        let staged = staging_root.join(name);
+        let target = install_root.join(name);
+        let backup = backup_root.join(name);
+        if target.exists() {
+            fs::create_dir_all(&backup_root).map_err(|error| error.to_string())?;
+            if let Err(error) = fs::rename(&target, &backup) {
+                rollback_builtin_skills(
+                    &install_root,
+                    &backup_root,
+                    &installed_names,
+                    &backed_up,
+                );
+                let _ = fs::remove_dir_all(&staging_root);
+                return Err(format!("Failed to back up skill {name}: {error}"));
+            }
+            backed_up.push(name.clone());
+        }
+        if let Err(error) = fs::rename(&staged, &target) {
+            if backup.exists() {
+                let _ = fs::rename(&backup, &target);
+                backed_up.retain(|item| item != name);
+            }
+            rollback_builtin_skills(
+                &install_root,
+                &backup_root,
+                &installed_names,
+                &backed_up,
+            );
+            let _ = fs::remove_dir_all(&staging_root);
+            return Err(format!("Failed to install skill {name}: {error}"));
+        }
+        installed_names.push(name.clone());
+    }
+
+    let marker = BuiltinSkillsMarker {
+        version: BUILTIN_SKILLS_VERSION.to_string(),
+        installed_at_ms: unix_millis(),
+        skills: names,
+    };
+    write_json_file(
+        &builtin_skills_marker_path(),
+        &serde_json::to_value(marker).map_err(|error| error.to_string())?,
+    )?;
+    let _ = fs::remove_dir_all(&staging_root);
+    if staging_parent
+        .read_dir()
+        .is_ok_and(|mut entries| entries.next().is_none())
+    {
+        let _ = fs::remove_dir(&staging_parent);
+    }
+
+    let backup_path = (!backed_up.is_empty()).then(|| path_string(&backup_root));
+    Ok(BuiltinSkillsInstallResult {
+        ok: true,
+        installed_files,
+        backup_path,
+        message: format!(
+            "{} built-in Claude skills installed.",
+            installed_names.len()
+        ),
+        status: builtin_skills_status_sync()?,
+    })
+}
+
+fn builtin_skill_names() -> Result<Vec<String>, String> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(BUILTIN_SKILLS_ARCHIVE))
+        .map_err(|error| error.to_string())?;
+    let mut names = HashSet::new();
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index(index)
+            .map_err(|error| error.to_string())?;
+        let parts = entry.name().split('/').collect::<Vec<_>>();
+        if parts.len() == 2
+            && parts[1] == "SKILL.md"
+            && validate_builtin_skill_name(parts[0])
+        {
+            names.insert(parts[0].to_string());
+        }
+    }
+    let mut names = names.into_iter().collect::<Vec<_>>();
+    names.sort();
+    if names.is_empty() {
+        return Err("The built-in skills archive is empty".to_string());
+    }
+    Ok(names)
+}
+
+fn extract_builtin_skills(
+    staging_root: &Path,
+    skill_names: &HashSet<String>,
+) -> Result<usize, String> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(BUILTIN_SKILLS_ARCHIVE))
+        .map_err(|error| error.to_string())?;
+    let mut extracted_files = 0usize;
+    let mut extracted_bytes = 0u64;
+
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|error| error.to_string())?;
+        if entry.is_dir() {
+            continue;
+        }
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170000 == 0o120000)
+        {
+            return Err(format!(
+                "Symbolic links are not allowed in the built-in skills archive: {}",
+                entry.name()
+            ));
+        }
+        let enclosed = entry
+            .enclosed_name()
+            .ok_or_else(|| format!("Unsafe path in built-in skills archive: {}", entry.name()))?;
+        let mut components = enclosed.components();
+        let Some(std::path::Component::Normal(root)) = components.next() else {
+            continue;
+        };
+        let root = root.to_string_lossy().to_string();
+        if !skill_names.contains(&root) {
+            continue;
+        }
+        let relative = components.collect::<PathBuf>();
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+
+        extracted_files += 1;
+        extracted_bytes = extracted_bytes.saturating_add(entry.size());
+        if extracted_files > 4096 || extracted_bytes > 64 * 1024 * 1024 {
+            return Err("The built-in skills archive exceeds the extraction limit".to_string());
+        }
+
+        let output_path = staging_root.join(&root).join(&relative);
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let mut output = fs::File::create(&output_path).map_err(|error| error.to_string())?;
+        std::io::copy(&mut entry, &mut output).map_err(|error| error.to_string())?;
+
+        #[cfg(unix)]
+        if output_path
+            .extension()
+            .is_some_and(|extension| extension == "sh")
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&output_path, fs::Permissions::from_mode(0o755))
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(extracted_files)
+}
+
+fn rollback_builtin_skills(
+    install_root: &Path,
+    backup_root: &Path,
+    installed_names: &[String],
+    backed_up: &[String],
+) {
+    for name in installed_names.iter().rev() {
+        let target = install_root.join(name);
+        if target.exists() {
+            let _ = fs::remove_dir_all(&target);
+        }
+    }
+    for name in backed_up.iter().rev() {
+        let backup = backup_root.join(name);
+        let target = install_root.join(name);
+        if backup.exists() && !target.exists() {
+            let _ = fs::rename(backup, target);
+        }
+    }
+}
+
+fn validate_builtin_skill_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 80
+        && !matches!(name, "." | "..")
+        && name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
+}
+
+fn claude_skills_root() -> PathBuf {
+    home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".claude")
+        .join("skills")
+}
+
+fn builtin_skills_marker_path() -> PathBuf {
+    claude_skills_root().join(".claude-plus-builtin-skills.json")
+}
+
 fn official_plugins_status_sync() -> OfficialPluginsStatus {
     let cli_path = claude_cli_path();
     let marketplace = official_marketplace_info();
@@ -6702,7 +7018,11 @@ fn main() {
     }
 
     tauri::Builder::default()
-        .setup(|_| {
+        .setup(|app| {
+            configure_desktop_shell(app)?;
+            #[cfg(target_os = "windows")]
+            std::thread::spawn(refresh_windows_shell_icons);
+
             if let Ok(mut config) = read_config() {
                 if apply_cc_switch_sync(&mut config).is_ok() {
                     if let Err(error) = write_config(&config) {
@@ -6717,7 +7037,16 @@ fn main() {
             }
             Ok(())
         })
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Resized(_) => {
+                if window.is_minimized().unwrap_or(false) {
+                    let _ = window.hide();
+                }
+            }
+            _ => {}
+        })
         .invoke_handler(tauri::generate_handler![
+            builtin_skills_status,
             detect_install,
             developer_capabilities_status,
             delete_api_provider,
@@ -6728,6 +7057,7 @@ fn main() {
             enable_virtual_machine_platform,
             gateway_status,
             history_scan_status,
+            install_builtin_skills,
             install_claude_modern,
             install_official_plugin,
             launch_claude_desktop,
@@ -6758,6 +7088,134 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Claude++ desktop app");
+}
+
+fn configure_desktop_shell(app: &mut tauri::App) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+    use tauri::tray::{
+        MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent,
+    };
+
+    let icon = app.default_window_icon().cloned();
+    if let (Some(window), Some(icon)) = (app.get_webview_window("main"), icon.clone()) {
+        window.set_icon(icon)?;
+    }
+
+    let show = MenuItem::with_id(app, "show", "显示 Claude++", true, None::<&str>)?;
+    let launch = MenuItem::with_id(
+        app,
+        "launch-claude",
+        "启动 Claude Desktop",
+        true,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(app, "quit", "退出 Claude++", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let menu = Menu::with_items(app, &[&show, &launch, &separator, &quit])?;
+
+    let mut tray = TrayIconBuilder::with_id("claude-plus")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .tooltip("Claude++")
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "show" => show_main_window(app),
+            "launch-claude" => {
+                tauri::async_runtime::spawn_blocking(|| {
+                    if let Err(error) = launch_claude_desktop_current_provider() {
+                        eprintln!("[Claude++] tray launch failed: {error}");
+                    }
+                });
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if matches!(
+                event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+            ) {
+                show_main_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = icon {
+        tray = tray.icon(icon);
+    }
+    tray.build(app)?;
+    Ok(())
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn refresh_windows_shell_icons() {
+    let Ok(executable) = std::env::current_exe() else {
+        return;
+    };
+    let Some(install_dir) = executable.parent() else {
+        return;
+    };
+    let expected_dir = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .map(|path| path.join("Claude++"));
+    if !expected_dir.is_some_and(|path| {
+        path_string(&path).eq_ignore_ascii_case(&path_string(install_dir))
+    }) {
+        return;
+    }
+
+    let icon_path = install_dir.join("claude-plus-plus.ico");
+    let icon_bytes = include_bytes!("../icons/icon.ico");
+    if fs::read(&icon_path).ok().as_deref() != Some(icon_bytes.as_slice())
+        && fs::write(&icon_path, icon_bytes).is_err()
+    {
+        return;
+    }
+
+    let icon_location = format!("{},0", path_string(&icon_path));
+    let script = format!(
+        r#"
+$targetPath = {target}
+$iconLocation = {icon}
+$workingDirectory = {working_dir}
+$shortcutPaths = @(
+  [IO.Path]::Combine([Environment]::GetFolderPath('Desktop'), 'Claude++.lnk'),
+  [IO.Path]::Combine([Environment]::GetFolderPath('Programs'), 'Claude++.lnk')
+)
+$shell = New-Object -ComObject WScript.Shell
+foreach ($shortcutPath in $shortcutPaths) {{
+  if (-not (Test-Path -LiteralPath $shortcutPath)) {{ continue }}
+  $shortcut = $shell.CreateShortcut($shortcutPath)
+  if ($shortcut.TargetPath -ieq $targetPath) {{
+    $shortcut.IconLocation = $iconLocation
+    $shortcut.WorkingDirectory = $workingDirectory
+    $shortcut.Save()
+  }}
+}}
+"#,
+        target = powershell_single_quoted(&path_string(&executable)),
+        icon = powershell_single_quoted(&icon_location),
+        working_dir = powershell_single_quoted(&path_string(install_dir)),
+    );
+    let _ = run_powershell_script_with_timeout(&script, Duration::from_secs(8));
+
+    let mut refresh = Command::new("ie4uinit.exe");
+    hide_child_console(&mut refresh);
+    let _ = refresh
+        .arg("-show")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
 }
 
 fn run_headless_command() -> bool {

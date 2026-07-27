@@ -151,18 +151,12 @@ body.fx-on .status-card {
   border-bottom: 1px solid var(--line-soft);
 }
 
-.sigil {
-  display: grid;
-  place-items: center;
+.app-logo {
+  display: block;
   width: 52px;
   height: 52px;
   flex: 0 0 auto;
-  border: 1px solid var(--green);
-  background: rgba(66, 255, 155, 0.08);
-  color: var(--green);
-  box-shadow: var(--shadow-green), inset 0 0 20px rgba(66, 255, 155, 0.12);
-  font-size: 15px;
-  font-weight: 800;
+  object-fit: contain;
 }
 
 h1,
@@ -1089,6 +1083,29 @@ dd {
   justify-content: flex-start;
 }
 
+.skill-pack-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 12px;
+  border: 1px solid var(--line-soft);
+  background: var(--line-soft);
+}
+
+.skill-pack-item {
+  min-width: 0;
+  padding: 8px 10px;
+  background: rgba(1, 8, 11, 0.92);
+  color: var(--muted);
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.skill-pack-item.installed {
+  color: var(--green);
+}
+
 .recommendation-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1575,8 +1592,9 @@ body.fx-on .led {
   .doctor-grid,
   .version-grid,
   .form-grid,
-  .sponsor-card,
-  .plugin-marketplace-list,
+    .sponsor-card,
+    .skill-pack-list,
+    .plugin-marketplace-list,
   .recommendation-grid,
   .recommendation-grid.compact,
   .mapping-row {

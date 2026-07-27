@@ -69,6 +69,7 @@ ClaudeDesktopPlusPlus 是面向 Claude Desktop 的外部增强启动器和管理
 - 一键启动 Claude Desktop，优先识别 Windows MSIX / modern installer。
 - 系统就绪检查，显示 Claude 安装方式、VMP、Hypervisor、重启状态等信息。
 - 官方插件市场同步，支持搜索、分页加载和安装。
+- 内置broken技能包包含 17 个 Claude Code 技能，支持一键安装、更新和同名技能备份。
 - 一键汉化，通过资源补丁安装 zh-CN 文案，不默认修改 `app.asar`。
 - 一键修复历史对话，自动选择可恢复来源并先备份当前 Claude-3p 数据。
 - 项目说明和联系方式保留在 README / 关于页，不进入核心使用流程。
@@ -187,6 +188,7 @@ Release 页面：<https://github.com/2270525352/ClaudeDesktopPlusPlus/releases>
 - Claude 官方 profile：`%APPDATA%\Claude`
 - cc-switch 配置：`%USERPROFILE%\.cc-switch`
 - Claude CLI 插件目录：`%USERPROFILE%\.claude\plugins`
+- Claude Code 技能目录：`%USERPROFILE%\.claude\skills`
 - Claude++ 构建产物：`apps/desktop/src-tauri/target/`
 
 仓库不会提交用户 API Key、Claude 登录态、本地缓存、构建产物或安装包。

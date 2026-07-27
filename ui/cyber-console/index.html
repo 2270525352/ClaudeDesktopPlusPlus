@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Claude++ Control Tower</title>
+    <link rel="icon" type="image/png" href="./assets/claude-plus-plus-logo.png" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -14,7 +15,7 @@
     <main class="app-shell" aria-label="Claude++ 控制台">
       <aside class="sidebar">
         <section class="brand-block">
-          <div class="sigil" aria-hidden="true">C++</div>
+          <img class="app-logo" src="./assets/claude-plus-plus-logo.png" alt="Claude++" />
           <div>
             <h1>Claude++</h1>
             <p data-i18n="tagline">桌面增强控制塔</p>
@@ -327,6 +328,30 @@
             <p class="warning-copy" data-i18n="localizationHint">
               安装 zh-CN 语言资源并写入 Claude locale；不修改 app.asar。
             </p>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">BUILT-IN SKILLS</p>
+                <h3 data-i18n="builtinSkillsTitle">内置broken技能包</h3>
+              </div>
+              <div class="button-row">
+                <button id="builtinSkillsInstallButton" class="text-button primary" type="button" data-action="installBuiltinSkills" data-i18n="builtinSkillsInstall">一键安装技能包</button>
+                <button class="text-button" type="button" data-action="refreshBuiltinSkills" data-i18n="builtinSkillsRefresh">刷新状态</button>
+              </div>
+            </div>
+            <dl class="detail-list compact">
+              <div><dt data-i18n="builtinSkillsPackVersion">内置版本</dt><dd id="builtinSkillsVersion">-</dd></div>
+              <div><dt data-i18n="builtinSkillsStatus">安装状态</dt><dd><span id="builtinSkillsBadge" class="seal warn">-</span> <span id="builtinSkillsState">-</span></dd></div>
+              <div><dt data-i18n="builtinSkillsCount">技能数量</dt><dd id="builtinSkillsCount">-</dd></div>
+              <div><dt data-i18n="builtinSkillsPath">安装目录</dt><dd id="builtinSkillsPath">-</dd></div>
+            </dl>
+            <div id="builtinSkillsList" class="skill-pack-list"></div>
+            <p class="warning-copy" data-i18n="builtinSkillsHint">
+              安装到 ~/.claude/skills；同名技能会先备份，安装过程不会执行包内脚本。首次安装后请重启 Claude Code。
+            </p>
+            <div id="builtinSkillsActionLog" class="evidence-log"></div>
           </section>
 
           <section class="panel">
