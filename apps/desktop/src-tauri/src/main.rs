@@ -2443,9 +2443,12 @@ fn launch_claude_desktop_current_provider() -> Result<LaunchResult, String> {
     )
     .map_err(|error| error.to_string())?;
     let process_id = launched.process_id;
-    let cdp_result = cdp_port.map(|port| inject_claude_via_cdp(&config, port));
+    let cdp_enabled = launched.cdp_enabled;
+    let launch_cdp_error = launched.cdp_error.clone();
+    let effective_cdp_port = cdp_port.filter(|_| cdp_enabled);
+    let cdp_result = effective_cdp_port.map(|port| inject_claude_via_cdp(&config, port));
     let cdp_injected = cdp_result.as_ref().is_some_and(Result::is_ok);
-    let cdp_error = cdp_result.and_then(Result::err);
+    let cdp_error = launch_cdp_error.or_else(|| cdp_result.and_then(Result::err));
     wait_for_launched_child(launched);
 
     Ok(LaunchResult {
@@ -2455,11 +2458,16 @@ fn launch_claude_desktop_current_provider() -> Result<LaunchResult, String> {
         sandbox_relaxed: config.sandbox.relax_sandbox && config.sandbox.acknowledged,
         clean_environment: false,
         launcher_route: launcher_route_label(&launch_install).to_string(),
-        injection_channel: injection_channel_label(&launch_install, uses_local_gateway).to_string(),
-        live_injection_supported,
+        injection_channel: injection_channel_label_for_launch(
+            &launch_install,
+            uses_local_gateway,
+            cdp_enabled,
+        )
+        .to_string(),
+        live_injection_supported: live_injection_supported && cdp_enabled,
         live_injection_attempted: cdp_port.is_some(),
         gateway_url,
-        cdp_port,
+        cdp_port: effective_cdp_port,
         cdp_injected,
         cdp_error,
         claude_3p,
@@ -2501,9 +2509,12 @@ fn launch_claude_desktop_with_provider(id: String) -> Result<LaunchResult, Strin
     )
     .map_err(|error| error.to_string())?;
     let process_id = launched.process_id;
-    let cdp_result = cdp_port.map(|port| inject_claude_via_cdp(&config, port));
+    let cdp_enabled = launched.cdp_enabled;
+    let launch_cdp_error = launched.cdp_error.clone();
+    let effective_cdp_port = cdp_port.filter(|_| cdp_enabled);
+    let cdp_result = effective_cdp_port.map(|port| inject_claude_via_cdp(&config, port));
     let cdp_injected = cdp_result.as_ref().is_some_and(Result::is_ok);
-    let cdp_error = cdp_result.and_then(Result::err);
+    let cdp_error = launch_cdp_error.or_else(|| cdp_result.and_then(Result::err));
     wait_for_launched_child(launched);
 
     Ok(LaunchResult {
@@ -2513,11 +2524,16 @@ fn launch_claude_desktop_with_provider(id: String) -> Result<LaunchResult, Strin
         sandbox_relaxed: config.sandbox.relax_sandbox && config.sandbox.acknowledged,
         clean_environment: false,
         launcher_route: launcher_route_label(&launch_install).to_string(),
-        injection_channel: injection_channel_label(&launch_install, uses_local_gateway).to_string(),
-        live_injection_supported,
+        injection_channel: injection_channel_label_for_launch(
+            &launch_install,
+            uses_local_gateway,
+            cdp_enabled,
+        )
+        .to_string(),
+        live_injection_supported: live_injection_supported && cdp_enabled,
         live_injection_attempted: cdp_port.is_some(),
         gateway_url,
-        cdp_port,
+        cdp_port: effective_cdp_port,
         cdp_injected,
         cdp_error,
         claude_3p,
@@ -2547,6 +2563,8 @@ enum LaunchMode {
 struct LaunchedClaude {
     process_id: u32,
     child: Option<Child>,
+    cdp_enabled: bool,
+    cdp_error: Option<String>,
 }
 
 fn launch_claude_plain(
@@ -2565,9 +2583,47 @@ fn launch_claude_plain(
         return Ok(LaunchedClaude {
             process_id,
             child: None,
+            cdp_enabled: false,
+            cdp_error: None,
         });
     }
 
+    let mut child = spawn_claude_child(install, config, mode)?;
+    match confirm_spawned_claude_process(install, &mut child) {
+        Ok(process_id) => Ok(LaunchedClaude {
+            process_id,
+            child: Some(child),
+            cdp_enabled: matches!(mode, LaunchMode::Inject { .. }),
+            cdp_error: None,
+        }),
+        Err(error) if matches!(mode, LaunchMode::Inject { .. }) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            terminate_claude_processes()?;
+
+            let mut fallback_child = spawn_claude_child(install, config, LaunchMode::Clean)?;
+            let process_id = confirm_spawned_claude_process(install, &mut fallback_child)
+                .map_err(|fallback_error| {
+                    anyhow::anyhow!(
+                        "Claude Desktop rejected the CDP launch and the configured fallback also failed. CDP: {error}. fallback: {fallback_error}"
+                    )
+                })?;
+            Ok(LaunchedClaude {
+                process_id,
+                child: Some(fallback_child),
+                cdp_enabled: false,
+                cdp_error: Some(format!("cdp_startup_rejected_fallback: {error}")),
+            })
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn spawn_claude_child(
+    install: &ClaudeInstall,
+    config: &AppConfig,
+    mode: LaunchMode,
+) -> anyhow::Result<Child> {
     let mut command = Command::new(&install.executable);
     hide_child_console(&mut command);
     command
@@ -2608,17 +2664,31 @@ fn launch_claude_plain(
         command.env("ELECTRON_DISABLE_SANDBOX", "1");
     }
 
-    let child = command.spawn()?;
-    let spawned_process_id = child.id();
-    let process_id = wait_for_claude_process(
-        install,
-        Some(spawned_process_id),
-        Duration::from_secs(8),
-    )?;
-    Ok(LaunchedClaude {
-        process_id,
-        child: Some(child),
-    })
+    command.spawn().map_err(Into::into)
+}
+
+fn confirm_spawned_claude_process(
+    install: &ClaudeInstall,
+    child: &mut Child,
+) -> anyhow::Result<u32> {
+    let process_id = child.id();
+    let started_at = Instant::now();
+    while started_at.elapsed() < Duration::from_millis(1500) {
+        if let Some(status) = child.try_wait()? {
+            return wait_for_claude_process(
+                install,
+                Some(process_id),
+                Duration::from_secs(2),
+            )
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "Claude Desktop exited with status {status} before its main process became ready"
+                )
+            });
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(process_id)
 }
 
 fn wait_for_claude_process(
@@ -2809,6 +2879,21 @@ fn injection_channel_label(install: &ClaudeInstall, uses_local_gateway: bool) ->
         (false, true) => "config_injection_plus_gateway",
         (false, false) => "config_injection_direct",
     }
+}
+
+fn injection_channel_label_for_launch(
+    install: &ClaudeInstall,
+    uses_local_gateway: bool,
+    cdp_enabled: bool,
+) -> &'static str {
+    if live_injection_supported_for_install(install) && !cdp_enabled {
+        return if uses_local_gateway {
+            "config_injection_fallback_plus_gateway"
+        } else {
+            "config_injection_fallback_direct"
+        };
+    }
+    injection_channel_label(install, uses_local_gateway)
 }
 
 fn activate_windows_app(app_user_model_id: &str, arguments: &str) -> Result<u32, String> {
@@ -7642,6 +7727,29 @@ fn run_headless_command() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cdp_fallback_reports_config_injection_channel() {
+        let install = ClaudeInstall {
+            executable: PathBuf::from("claude.exe"),
+            working_dir: PathBuf::from("."),
+            source: "test",
+            app_user_model_id: None,
+        };
+
+        assert_eq!(
+            injection_channel_label_for_launch(&install, false, false),
+            "config_injection_fallback_direct"
+        );
+        assert_eq!(
+            injection_channel_label_for_launch(&install, true, false),
+            "config_injection_fallback_plus_gateway"
+        );
+        assert_eq!(
+            injection_channel_label_for_launch(&install, false, true),
+            "live_script_plus_direct_config"
+        );
+    }
 
     #[test]
     fn restore_meta_removes_owned_entries_and_restores_previous_selection() {

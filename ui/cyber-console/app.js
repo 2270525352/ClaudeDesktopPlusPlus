@@ -363,6 +363,7 @@
       injectLaunchVerified: "Claude Desktop 已启动，进程 {pid}，验证：{verdict}",
       cdpInjected: "实时能力脚本已启用，端口 {port}",
       cdpFailed: "实时能力脚本失败：{error}",
+      cdpFallback: "新版 Claude 拒绝 CDP 启动参数，已自动改用配置启动；3P 直连仍然有效",
       cdpMsixUnavailable: "当前 MSIX 版 Claude Desktop 已改用 Claude-3p 配置方式",
       localizationTitle: "一键汉化",
       localizationStatus: "汉化状态",
@@ -386,6 +387,8 @@
       injectionPreloadDirect: "预加载脚本 + 直连",
       injectionConfigGateway: "配置启动 + Gateway",
       injectionConfigDirect: "配置启动 + 直连",
+      injectionConfigFallbackGateway: "配置启动 + Gateway（CDP 已降级）",
+      injectionConfigFallbackDirect: "配置启动 + 直连（CDP 已降级）",
       liveInjectionReady: "支持实时脚本",
       preloadInjectionReady: "预加载脚本已启用",
       liveInjectionConfigOnly: "使用配置启动",
@@ -840,6 +843,7 @@
       injectLaunchVerified: "Claude Desktop started, process {pid}, verification: {verdict}",
       cdpInjected: "Live capability script enabled on port {port}",
       cdpFailed: "Live capability script failed: {error}",
+      cdpFallback: "This Claude version rejected CDP startup flags, so Claude++ automatically used configured startup; direct 3P routing remains active",
       cdpMsixUnavailable: "The current MSIX Claude Desktop uses Claude-3p config mode instead.",
       localizationTitle: "One-click Chinese UI",
       localizationStatus: "Localization Status",
@@ -863,6 +867,8 @@
       injectionPreloadDirect: "Preload script + Direct",
       injectionConfigGateway: "Configured start + Gateway",
       injectionConfigDirect: "Configured start + Direct",
+      injectionConfigFallbackGateway: "Configured start + Gateway (CDP fallback)",
+      injectionConfigFallbackDirect: "Configured start + Direct (CDP fallback)",
       liveInjectionReady: "Live script supported",
       preloadInjectionReady: "Preload script enabled",
       liveInjectionConfigOnly: "Using configured start",
@@ -3062,7 +3068,11 @@
     if (result.cdp_injected) {
       parts.push(t("cdpInjected", { port: result.cdp_port || "-" }));
     } else if (result.cdp_error) {
-      parts.push(t("cdpFailed", { error: cdpErrorLabel(result.cdp_error) }));
+      parts.push(
+        isCdpStartupFallback(result.cdp_error)
+          ? t("cdpFallback")
+          : t("cdpFailed", { error: cdpErrorLabel(result.cdp_error) }),
+      );
     }
     return parts.join(" / ");
   }
@@ -3091,6 +3101,8 @@
     if (channel === "preload_script_plus_direct_config") return t("injectionPreloadDirect");
     if (channel === "config_injection_plus_gateway") return t("injectionConfigGateway");
     if (channel === "config_injection_direct") return t("injectionConfigDirect");
+    if (channel === "config_injection_fallback_plus_gateway") return t("injectionConfigFallbackGateway");
+    if (channel === "config_injection_fallback_direct") return t("injectionConfigFallbackDirect");
     return "-";
   }
 
@@ -3107,6 +3119,10 @@
       return t("cdpMsixUnavailable");
     }
     return error;
+  }
+
+  function isCdpStartupFallback(error) {
+    return String(error).includes("cdp_startup_rejected_fallback");
   }
 
   function renderProviderTest() {
