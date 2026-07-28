@@ -68,21 +68,24 @@ ClaudeDesktopPlusPlus（Claude++）是面向 Claude Desktop 的第三方桌面�
 - 本地插件功能使用 Claude 官方 CLI 和官方插件目录，不等同于组织后台下发的插件。
 - 历史修复会先备份当前目标数据，默认不会复制登录凭据。
 - Windows 卸载程序会自动移除 Claude++ 写入的 3P 路由；也可在「API 配置」中手动恢复 Claude 官方配置。
-- 本次兼容性与卸载恢复改动见 [v0.1.44 修复说明](docs/releases/v0.1.44-fixes.md)。
-- `v0.1.45` 的发布内容见 [v0.1.45 发布说明](docs/releases/v0.1.45.md)。
-- `v0.1.46` 已为 macOS ARM64 和 Intel x64 应用加入代码签名及 DMG 内签名校验，修复浏览器下载后提示应用损坏的问题。
-- `v0.1.47` 使用简短安装包名称，并为 Windows/macOS 增加 Claude Desktop 自动版本检查与一键安装、更新。
-- `v0.1.51` 将连接策略统一为直连优先：新配置不再默认启动 Gateway，OpenAI/Codex 上游缺少 Claude 协议映射时才手动启用 Gateway。
-- `v0.1.52` 增加第三方模型筛选与逐模型 1M 开关；cc-switch 改为只读同步；历史修复支持重置状态；Windows 启动不再出现终端黑框。
-- `v0.1.53` 修复 macOS 一键安装 Claude Desktop 时官方 PKG 地址返回 403 的问题，增加系统 curl、官方 DMG 和下载页多级回退。
-- `v0.1.54` 修复旧版汉化改写 `Claude.app` 后触发 macOS“应用已损坏”的问题；macOS 汉化改为运行时注入，并增加签名校验、旧补丁精确回滚和官方安装包修复。
-- `v0.1.55` 启动 Claude++ 时优先检查自身版本；发现新版会弹窗显示当前版本和最新版本，并允许立即升级或稍后处理。
-- `v0.1.56` 将 macOS Claude Desktop 安装切换为官方 Universal DMG，并让“系统就绪”按 Windows/macOS 分别展示对应的检查项目。
-- `v0.1.57` 修复 macOS 上 Claude Desktop 假启动和汉化假成功：改用 LaunchServices 启动并校验真实应用进程，补齐官方/3P locale 与应用级语言偏好，汉化状态会区分“已配置”和“已生效”。
+
+### 版本记录
+
 - `v0.1.58` 修复未安装或未探测到 Claude CLI 时无法同步官方插件市场的问题；目录可直接通过 Git 同步，插件安装仍由 Claude CLI 完成。
+- `v0.1.57` 修复 macOS 上 Claude Desktop 假启动和汉化假成功：改用 LaunchServices 启动并校验真实应用进程，补齐官方/3P locale 与应用级语言偏好，汉化状态会区分“已配置”和“已生效”。
+- `v0.1.56` 将 macOS Claude Desktop 安装切换为官方 Universal DMG，并让“系统就绪”按 Windows/macOS 分别展示对应的检查项目。
+- `v0.1.55` 启动 Claude++ 时优先检查自身版本；发现新版会弹窗显示当前版本和最新版本，并允许立即升级或稍后处理。
+- `v0.1.54` 修复旧版汉化改写 `Claude.app` 后触发 macOS“应用已损坏”的问题；macOS 汉化改为运行时注入，并增加签名校验、旧补丁精确回滚和官方安装包修复。
+- `v0.1.53` 修复 macOS 一键安装 Claude Desktop 时官方 PKG 地址返回 403 的问题，增加系统 curl、官方 DMG 和下载页多级回退。
+- `v0.1.52` 增加第三方模型筛选与逐模型 1M 开关；cc-switch 改为只读同步；历史修复支持重置状态；Windows 启动不再出现终端黑框。
+- `v0.1.51` 将连接策略统一为直连优先：新配置不再默认启动 Gateway，OpenAI/Codex 上游缺少 Claude 协议映射时才手动启用 Gateway。
 - `v0.1.50` 优化 Claude Desktop 启动流畅度：启动任务后台执行，新版 Windows Claude 直接使用 3P 配置启动，不再重复等待已知失败的 CDP 降级链路。
 - `v0.1.49` 为 Claude Desktop 和 Claude++ 升级增加实时进度条；修复隐藏 PowerShell 处理官方重定向时的 `exit 1`，Windows 安装阶段会按需请求管理员授权并显示详细错误。
 - `v0.1.48` 修复官方最新版本重定向解析，并在应用启动后自动执行版本检查；检查失败时会直接显示错误状态。
+- `v0.1.47` 使用简短安装包名称，并为 Windows/macOS 增加 Claude Desktop 自动版本检查与一键安装、更新。
+- `v0.1.46` 已为 macOS ARM64 和 Intel x64 应用加入代码签名及 DMG 内签名校验，修复浏览器下载后提示应用损坏的问题。
+- `v0.1.45` 的发布内容见 [v0.1.45 发布说明](docs/releases/v0.1.45.md)。
+- 本次兼容性与卸载恢复改动见 [v0.1.44 修复说明](docs/releases/v0.1.44-fixes.md)。
 
 ## 开发
 
@@ -108,7 +111,6 @@ npm run bundle
 - [Issues](https://github.com/2270525352/ClaudeDesktopPlusPlus/issues)
 - [Releases](https://github.com/2270525352/ClaudeDesktopPlusPlus/releases)
 - 邮箱：<a href="mailto:2270525352@qq.com">2270525352@qq.com</a>
-- 参考项目：[Codex++](https://github.com/BigPizzaV3/CodexPlusPlus)
 
 ## License
 
