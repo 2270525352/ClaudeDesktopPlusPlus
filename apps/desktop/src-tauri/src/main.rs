@@ -2671,12 +2671,17 @@ fn install_chinese_localization_patch() -> Result<(String, String, String), Stri
     {
         let integrity = ensure_macos_claude_launchable(&install)?;
         let locale_paths = set_claude_locale("zh-CN")?;
+        let language_preferences = set_macos_claude_language_preferences(&install, "zh-CN")?;
         return Ok((
             format!(
-                "Chinese localization enabled through locale configuration and the runtime script. The signed Claude.app bundle was not modified. Locale written to {} config file(s).",
+                "Chinese localization is configured. Launch Claude Desktop from Claude++ to apply the runtime translation script. The signed Claude.app bundle was not modified. Locale written to {} config file(s).",
                 locale_paths.len()
             ),
-            integrity,
+            [integrity, language_preferences.join("\n")]
+                .into_iter()
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n"),
             String::new(),
         ));
     }
@@ -2726,12 +2731,17 @@ fn uninstall_chinese_localization_patch() -> Result<(String, String, String), St
     {
         let integrity = ensure_macos_claude_launchable(&install)?;
         let locale_paths = set_claude_locale("en-US")?;
+        let language_preferences = set_macos_claude_language_preferences(&install, "en-US")?;
         return Ok((
             format!(
                 "Chinese localization runtime script disabled. The signed Claude.app bundle was not modified. Locale restored to en-US in {} config file(s).",
                 locale_paths.len()
             ),
-            integrity,
+            [integrity, language_preferences.join("\n")]
+                .into_iter()
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n"),
             String::new(),
         ));
     }
@@ -3423,6 +3433,71 @@ fn set_claude_locale(locale: &str) -> Result<Vec<String>, String> {
     Ok(touched)
 }
 
+#[cfg(target_os = "macos")]
+fn set_macos_claude_language_preferences(
+    install: &ClaudeInstall,
+    locale: &str,
+) -> Result<Vec<String>, String> {
+    let bundle = macos_app_bundle_for_install(install)
+        .ok_or_else(|| "Claude.app bundle could not be located".to_string())?;
+    let info_plist = bundle.join("Contents").join("Info.plist");
+    let identifier_output = Command::new("/usr/libexec/PlistBuddy")
+        .args(["-c", "Print :CFBundleIdentifier"])
+        .arg(&info_plist)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !identifier_output.status.success() {
+        return Err(format_command_failure(&identifier_output));
+    }
+    let bundle_identifier = String::from_utf8_lossy(&identifier_output.stdout)
+        .trim()
+        .to_string();
+    if bundle_identifier.is_empty() {
+        return Err("Claude.app CFBundleIdentifier is empty".to_string());
+    }
+
+    let (apple_locale, languages) = if locale.eq_ignore_ascii_case("zh-CN") {
+        ("zh_CN", ["zh-Hans", "zh-CN"].as_slice())
+    } else {
+        ("en_US", ["en-US", "en"].as_slice())
+    };
+
+    let language_output = Command::new("/usr/bin/defaults")
+        .args([
+            "write",
+            &bundle_identifier,
+            "AppleLanguages",
+            "-array",
+        ])
+        .args(languages)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !language_output.status.success() {
+        return Err(format_command_failure(&language_output));
+    }
+
+    let locale_output = Command::new("/usr/bin/defaults")
+        .args([
+            "write",
+            &bundle_identifier,
+            "AppleLocale",
+            apple_locale,
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !locale_output.status.success() {
+        return Err(format_command_failure(&locale_output));
+    }
+
+    Ok(vec![
+        format!("AppleLanguages written for {bundle_identifier}: {}", languages.join(", ")),
+        format!("AppleLocale written for {bundle_identifier}: {apple_locale}"),
+    ])
+}
+
 fn current_claude_locale() -> Option<String> {
     claude_locale_config_paths().into_iter().find_map(|path| {
         read_json_file(&path)
@@ -3477,6 +3552,21 @@ fn claude_locale_config_paths() -> Vec<PathBuf> {
             &mut paths,
             &mut seen,
             roaming.join("Claude").join("config.json"),
+        );
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let application_support = PathBuf::from(home)
+            .join("Library")
+            .join("Application Support");
+        push_unique_path(
+            &mut paths,
+            &mut seen,
+            application_support.join("Claude-3p").join("config.json"),
+        );
+        push_unique_path(
+            &mut paths,
+            &mut seen,
+            application_support.join("Claude").join("config.json"),
         );
     }
     paths
@@ -3643,17 +3733,26 @@ fn launch_claude_desktop_current_provider_sync() -> Result<LaunchResult, String>
     let process_id = launched.process_id;
     let cdp_enabled = launched.cdp_enabled;
     let launch_cdp_error = launched.cdp_error.clone();
-    let effective_cdp_port = cdp_port.filter(|_| cdp_enabled);
-    let cdp_result = effective_cdp_port.map(|port| inject_claude_via_cdp(&config, port));
+    let attempted_cdp_port = cdp_port.filter(|_| cdp_enabled);
+    let cdp_result = attempted_cdp_port.map(|port| inject_claude_via_cdp(&config, port));
     let cdp_injected = cdp_result.as_ref().is_some_and(Result::is_ok);
     let cdp_error = launch_cdp_error
         .or_else(|| cdp_result.and_then(Result::err))
         .map(classify_cdp_error);
-    wait_for_launched_child(launched);
+    let finalized = finalize_claude_launch_after_cdp(
+        &launch_install,
+        &config,
+        launched,
+        process_id,
+        cdp_injected,
+        cdp_error,
+    )?;
+    let effective_cdp_port = cdp_port.filter(|_| finalized.cdp_enabled);
+    wait_for_launched_child(finalized.launched);
 
     Ok(LaunchResult {
         executable: path_string(&launch_install.executable),
-        process_id,
+        process_id: finalized.process_id,
         injected_provider_id: config.active_provider_id,
         sandbox_relaxed: config.sandbox.relax_sandbox && config.sandbox.acknowledged,
         clean_environment: false,
@@ -3661,15 +3760,15 @@ fn launch_claude_desktop_current_provider_sync() -> Result<LaunchResult, String>
         injection_channel: injection_channel_label_for_launch(
             &launch_install,
             uses_local_gateway,
-            cdp_enabled,
+            finalized.cdp_enabled,
         )
         .to_string(),
-        live_injection_supported: live_injection_supported && cdp_enabled,
+        live_injection_supported: live_injection_supported && finalized.cdp_enabled,
         live_injection_attempted: cdp_port.is_some(),
         gateway_url,
         cdp_port: effective_cdp_port,
-        cdp_injected,
-        cdp_error,
+        cdp_injected: finalized.cdp_injected,
+        cdp_error: finalized.cdp_error,
         claude_3p,
         verification: Some(verify_launch(before, uses_local_gateway)),
     })
@@ -3715,17 +3814,26 @@ fn launch_claude_desktop_with_provider_sync(id: String) -> Result<LaunchResult, 
     let process_id = launched.process_id;
     let cdp_enabled = launched.cdp_enabled;
     let launch_cdp_error = launched.cdp_error.clone();
-    let effective_cdp_port = cdp_port.filter(|_| cdp_enabled);
-    let cdp_result = effective_cdp_port.map(|port| inject_claude_via_cdp(&config, port));
+    let attempted_cdp_port = cdp_port.filter(|_| cdp_enabled);
+    let cdp_result = attempted_cdp_port.map(|port| inject_claude_via_cdp(&config, port));
     let cdp_injected = cdp_result.as_ref().is_some_and(Result::is_ok);
     let cdp_error = launch_cdp_error
         .or_else(|| cdp_result.and_then(Result::err))
         .map(classify_cdp_error);
-    wait_for_launched_child(launched);
+    let finalized = finalize_claude_launch_after_cdp(
+        &launch_install,
+        &config,
+        launched,
+        process_id,
+        cdp_injected,
+        cdp_error,
+    )?;
+    let effective_cdp_port = cdp_port.filter(|_| finalized.cdp_enabled);
+    wait_for_launched_child(finalized.launched);
 
     Ok(LaunchResult {
         executable: path_string(&launch_install.executable),
-        process_id,
+        process_id: finalized.process_id,
         injected_provider_id: config.active_provider_id,
         sandbox_relaxed: config.sandbox.relax_sandbox && config.sandbox.acknowledged,
         clean_environment: false,
@@ -3733,15 +3841,15 @@ fn launch_claude_desktop_with_provider_sync(id: String) -> Result<LaunchResult, 
         injection_channel: injection_channel_label_for_launch(
             &launch_install,
             uses_local_gateway,
-            cdp_enabled,
+            finalized.cdp_enabled,
         )
         .to_string(),
-        live_injection_supported: live_injection_supported && cdp_enabled,
+        live_injection_supported: live_injection_supported && finalized.cdp_enabled,
         live_injection_attempted: cdp_port.is_some(),
         gateway_url,
         cdp_port: effective_cdp_port,
-        cdp_injected,
-        cdp_error,
+        cdp_injected: finalized.cdp_injected,
+        cdp_error: finalized.cdp_error,
         claude_3p,
         verification: Some(verify_launch(before, uses_local_gateway)),
     })
@@ -3770,6 +3878,14 @@ struct LaunchedClaude {
     process_id: u32,
     child: Option<Child>,
     cdp_enabled: bool,
+    cdp_error: Option<String>,
+}
+
+struct FinalizedClaudeLaunch {
+    launched: LaunchedClaude,
+    process_id: u32,
+    cdp_enabled: bool,
+    cdp_injected: bool,
     cdp_error: Option<String>,
 }
 
@@ -3832,6 +3948,16 @@ fn spawn_claude_child(
     config: &AppConfig,
     mode: LaunchMode,
 ) -> anyhow::Result<Child> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("/usr/bin/open");
+        command.args(
+            macos_open_prefix_arguments(install)
+                .map_err(anyhow::Error::msg)?,
+        );
+        command
+    };
+    #[cfg(not(target_os = "macos"))]
     let mut command = Command::new(&install.executable);
     hide_child_console(&mut command);
     command
@@ -3875,10 +4001,30 @@ fn spawn_claude_child(
     command.spawn().map_err(Into::into)
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn macos_open_prefix_arguments(install: &ClaudeInstall) -> Result<Vec<String>, String> {
+    let bundle = macos_app_bundle_for_install(install)
+        .ok_or_else(|| "Claude.app bundle could not be located".to_string())?;
+    Ok(vec![
+        "-n".to_string(),
+        "-W".to_string(),
+        "-a".to_string(),
+        path_string(&bundle),
+        "--args".to_string(),
+    ])
+}
+
 fn confirm_spawned_claude_process(
     install: &ClaudeInstall,
     child: &mut Child,
 ) -> anyhow::Result<u32> {
+    #[cfg(target_os = "macos")]
+    {
+        return confirm_macos_launched_claude_process(install, child);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
     let process_id = child.id();
     let started_at = Instant::now();
     while started_at.elapsed() < Duration::from_millis(1500) {
@@ -3897,6 +4043,49 @@ fn confirm_spawned_claude_process(
         std::thread::sleep(Duration::from_millis(100));
     }
     Ok(process_id)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn confirm_macos_launched_claude_process(
+    install: &ClaudeInstall,
+    launch_services_child: &mut Child,
+) -> anyhow::Result<u32> {
+    let activation_process_id = launch_services_child.id();
+    let started_at = Instant::now();
+    let mut stable_process_id = None;
+    let mut stable_since = Instant::now();
+
+    while started_at.elapsed() < Duration::from_secs(20) {
+        if let Some(status) = launch_services_child.try_wait()? {
+            return Err(anyhow::anyhow!(
+                "macOS LaunchServices exited with status {status} before Claude Desktop became ready. activation pid: {activation_process_id}, install: {}",
+                install.executable.display()
+            ));
+        }
+
+        match find_running_claude_process_id_macos(install, stable_process_id) {
+            Some(process_id) if stable_process_id == Some(process_id) => {
+                if stable_since.elapsed() >= Duration::from_millis(1200) {
+                    return Ok(process_id);
+                }
+            }
+            Some(process_id) => {
+                stable_process_id = Some(process_id);
+                stable_since = Instant::now();
+            }
+            None => {
+                stable_process_id = None;
+                stable_since = Instant::now();
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    Err(anyhow::anyhow!(
+        "Claude Desktop did not create a stable process for the selected app bundle. activation pid: {activation_process_id}, install: {}",
+        install.executable.display()
+    ))
 }
 
 fn wait_for_claude_process(
@@ -3929,7 +4118,7 @@ fn find_running_claude_process_id(
         return find_running_claude_process_id_windows(install, preferred_process_id);
     }
     if cfg!(target_os = "macos") {
-        return find_running_claude_process_id_macos(preferred_process_id);
+        return find_running_claude_process_id_macos(install, preferred_process_id);
     }
     None
 }
@@ -3983,21 +4172,12 @@ fn find_running_claude_process_id_windows(
 }
 
 #[cfg(target_os = "macos")]
-fn find_running_claude_process_id_macos(preferred_process_id: Option<u32>) -> Option<u32> {
-    if let Some(process_id) = preferred_process_id {
-        let status = Command::new("kill")
-            .args(["-0", &process_id.to_string()])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .ok();
-        if status.is_some_and(|status| status.success()) {
-            return Some(process_id);
-        }
-    }
-    let output = Command::new("pgrep")
-        .args(["-x", "Claude"])
+fn find_running_claude_process_id_macos(
+    install: &ClaudeInstall,
+    preferred_process_id: Option<u32>,
+) -> Option<u32> {
+    let output = Command::new("/bin/ps")
+        .args(["-axo", "pid=,args="])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
@@ -4005,21 +4185,132 @@ fn find_running_claude_process_id_macos(preferred_process_id: Option<u32>) -> Op
     if !output.status.success() {
         return None;
     }
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .find_map(|line| line.trim().parse::<u32>().ok())
+    macos_claude_process_id_from_lines(
+        install,
+        preferred_process_id,
+        String::from_utf8_lossy(&output.stdout).lines(),
+    )
 }
 
 #[cfg(not(target_os = "macos"))]
-fn find_running_claude_process_id_macos(_preferred_process_id: Option<u32>) -> Option<u32> {
+fn find_running_claude_process_id_macos(
+    _install: &ClaudeInstall,
+    _preferred_process_id: Option<u32>,
+) -> Option<u32> {
     None
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn macos_claude_process_id_from_lines<'a>(
+    install: &ClaudeInstall,
+    preferred_process_id: Option<u32>,
+    process_lines: impl IntoIterator<Item = &'a str>,
+) -> Option<u32> {
+    let executable = path_string(&install.executable);
+    let canonical_executable = install
+        .executable
+        .canonicalize()
+        .ok()
+        .map(|path| path_string(&path));
+    let bundle_executable_dir = macos_app_bundle_for_install(install)
+        .map(|bundle| path_string(&bundle.join("Contents").join("MacOS")));
+    let mut process_ids = process_lines
+        .into_iter()
+        .filter_map(|line| {
+            let trimmed = line.trim_start();
+            let split_at = trimmed.find(char::is_whitespace)?;
+            let process_id = trimmed[..split_at].parse::<u32>().ok()?;
+            let arguments = trimmed[split_at..].trim_start();
+            let matches_executable = arguments.contains(&executable)
+                || canonical_executable
+                    .as_deref()
+                    .is_some_and(|path| arguments.contains(path))
+                || bundle_executable_dir.as_deref().is_some_and(|directory| {
+                    arguments.contains(&format!("{directory}/Claude"))
+                        || arguments.contains(&format!("{directory}/claude"))
+                });
+            (matches_executable && !arguments.contains("/Helpers/")).then_some(process_id)
+        })
+        .collect::<Vec<_>>();
+    process_ids.sort_unstable();
+    process_ids.dedup();
+
+    preferred_process_id
+        .filter(|preferred| process_ids.contains(preferred))
+        .or_else(|| process_ids.into_iter().max())
+}
+
+fn require_running_claude_process(
+    install: &ClaudeInstall,
+    preferred_process_id: Option<u32>,
+) -> anyhow::Result<u32> {
+    find_running_claude_process_id(install, preferred_process_id).ok_or_else(|| {
+        let process_hint = preferred_process_id
+            .map(|process_id| process_id.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        anyhow::anyhow!(
+            "Claude Desktop exited before launch verification completed. process: {process_hint}, install: {}",
+            install.executable.display()
+        )
+    })
+}
+
+fn finalize_claude_launch_after_cdp(
+    install: &ClaudeInstall,
+    config: &AppConfig,
+    mut launched: LaunchedClaude,
+    process_id: u32,
+    cdp_injected: bool,
+    cdp_error: Option<String>,
+) -> Result<FinalizedClaudeLaunch, String> {
+    match require_running_claude_process(install, Some(process_id)) {
+        Ok(running_process_id) => {
+            let cdp_enabled = launched.cdp_enabled;
+            Ok(FinalizedClaudeLaunch {
+                launched,
+                process_id: running_process_id,
+                cdp_enabled,
+                cdp_injected,
+                cdp_error,
+            })
+        }
+        Err(process_error) if launched.cdp_enabled => {
+            if let Some(mut child) = launched.child.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            terminate_claude_processes(Some(install)).map_err(|error| error.to_string())?;
+            let fallback = launch_claude_plain(install, config, LaunchMode::Clean)
+                .map_err(|error| error.to_string())?;
+            let fallback_process_id =
+                require_running_claude_process(install, Some(fallback.process_id))
+                    .map_err(|error| error.to_string())?;
+            let previous_error = cdp_error
+                .filter(|error| !error.is_empty())
+                .map(|error| format!(" CDP detail: {error}"))
+                .unwrap_or_default();
+            Ok(FinalizedClaudeLaunch {
+                launched: fallback,
+                process_id: fallback_process_id,
+                cdp_enabled: false,
+                cdp_injected: false,
+                cdp_error: Some(format!(
+                    "cdp_runtime_exited_fallback: {process_error}.{previous_error}"
+                )),
+            })
+        }
+        Err(process_error) => Err(process_error.to_string()),
+    }
 }
 
 fn launch_arguments(config: &AppConfig, mode: LaunchMode) -> Vec<String> {
     let mut arguments = Vec::new();
     if let LaunchMode::Inject { cdp_port } = mode {
         arguments.push(format!("--remote-debugging-port={cdp_port}"));
-        arguments.push("--remote-allow-origins=*".to_string());
+        arguments.push("--remote-debugging-address=127.0.0.1".to_string());
+        arguments.push(format!(
+            "--remote-allow-origins=http://127.0.0.1:{cdp_port}"
+        ));
     }
     if matches!(mode, LaunchMode::Inject { .. })
         && config.sandbox.relax_sandbox
@@ -4215,6 +4506,7 @@ fn inject_claude_via_cdp(config: &AppConfig, cdp_port: u16) -> Result<(), String
 
 fn classify_cdp_error(error: String) -> String {
     if error.starts_with("cdp_startup_rejected_fallback:")
+        || error.starts_with("cdp_runtime_exited_fallback:")
         || error.starts_with("cdp_unavailable_config_only:")
     {
         return error;
@@ -9626,6 +9918,64 @@ mod tests {
     fn gateway_defaults_to_direct_mode() {
         assert!(!GatewayConfig::default().enabled);
         assert!(!AppConfig::default().gateway.enabled);
+    }
+
+    #[test]
+    fn macos_launch_uses_the_selected_app_bundle_and_cdp_arguments() {
+        let install = ClaudeInstall {
+            executable: PathBuf::from("/Applications/Claude.app/Contents/MacOS/Claude"),
+            working_dir: PathBuf::from("/Applications/Claude.app/Contents/MacOS"),
+            source: "test",
+            app_user_model_id: None,
+        };
+
+        assert_eq!(
+            macos_open_prefix_arguments(&install).unwrap(),
+            vec![
+                "-n",
+                "-W",
+                "-a",
+                "/Applications/Claude.app",
+                "--args"
+            ]
+        );
+
+        let arguments = launch_arguments(&AppConfig::default(), LaunchMode::Inject {
+            cdp_port: 49321,
+        });
+        assert_eq!(
+            arguments,
+            vec![
+                "--remote-debugging-port=49321",
+                "--remote-debugging-address=127.0.0.1",
+                "--remote-allow-origins=http://127.0.0.1:49321"
+            ]
+        );
+    }
+
+    #[test]
+    fn macos_process_detection_matches_the_selected_main_executable_only() {
+        let install = ClaudeInstall {
+            executable: PathBuf::from("/Applications/Claude.app/Contents/MacOS/Claude"),
+            working_dir: PathBuf::from("/Applications/Claude.app/Contents/MacOS"),
+            source: "test",
+            app_user_model_id: None,
+        };
+        let process_lines = [
+            " 101 /Users/test/Applications/Claude.app/Contents/MacOS/Claude",
+            " 102 /Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper --type=renderer",
+            " 103 /Applications/Claude.app/Contents/MacOS/Claude --remote-debugging-port=49321",
+            " 104 /usr/bin/open -n -W -a /Applications/Claude.app",
+        ];
+
+        assert_eq!(
+            macos_claude_process_id_from_lines(&install, None, process_lines),
+            Some(103)
+        );
+        assert_eq!(
+            macos_claude_process_id_from_lines(&install, Some(103), process_lines),
+            Some(103)
+        );
     }
 
     #[test]

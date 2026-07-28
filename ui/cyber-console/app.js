@@ -423,6 +423,7 @@
       localizationRuntime: "生效通道",
       localizationNotInstalled: "未安装",
       localizationEnabled: "已启用",
+      localizationConfigured: "已配置，待启动生效",
       localizationDisabled: "已停用",
       localizationResourcePatch: "资源补丁 / zh-CN",
       localizationRuntimeSafe: "运行时脚本 / locale（不修改应用签名）",
@@ -431,8 +432,8 @@
       localizationLegacyPatch: "检测到旧版 macOS 资源补丁",
       enableChineseLocalization: "一键启用汉化",
       disableChineseLocalization: "停用汉化",
-      localizationHint: "Windows 使用语言资源；macOS 使用运行时脚本与 locale，不修改已签名的 Claude.app。",
-      localizationEnabledLog: "汉化已启用；重启 Claude Desktop 后以 zh-CN 加载",
+      localizationHint: "Windows 使用语言资源；macOS 从 Claude++ 启动并成功加载运行时脚本后生效，不修改 Claude.app 签名。",
+      localizationEnabledLog: "汉化已配置；请从 Claude++ 启动 Claude Desktop，实时脚本加载成功后生效",
       localizationDisabledLog: "汉化已停用；语言已恢复 en-US",
       launcherRouteExternalProcess: "进程启动",
       launcherRouteAppActivation: "系统应用激活",
@@ -961,6 +962,7 @@
       localizationRuntime: "Runtime Channel",
       localizationNotInstalled: "Not installed",
       localizationEnabled: "Enabled",
+      localizationConfigured: "Configured, pending launch",
       localizationDisabled: "Disabled",
       localizationResourcePatch: "Resource patch / zh-CN",
       localizationRuntimeSafe: "Runtime script / locale (signed app unchanged)",
@@ -969,8 +971,8 @@
       localizationLegacyPatch: "Legacy macOS resource patch detected",
       enableChineseLocalization: "Enable Chinese UI",
       disableChineseLocalization: "Disable Chinese UI",
-      localizationHint: "Windows uses language resources. macOS uses a runtime script and locale without modifying the signed Claude.app.",
-      localizationEnabledLog: "Chinese UI enabled; restart Claude Desktop to load zh-CN",
+      localizationHint: "Windows uses language resources. On macOS, launch Claude Desktop from Claude++ so the runtime script can load without modifying the signed app.",
+      localizationEnabledLog: "Chinese UI configured. Launch Claude Desktop from Claude++; it becomes active after the live script loads.",
       localizationDisabledLog: "Chinese UI disabled; locale restored to en-US",
       launcherRouteExternalProcess: "Process start",
       launcherRouteAppActivation: "System app activation",
@@ -3649,6 +3651,7 @@
   function isCdpStartupFallback(error) {
     const value = String(error);
     return value.includes("cdp_startup_rejected_fallback")
+      || value.includes("cdp_runtime_exited_fallback")
       || value.includes("cdp_unavailable_config_only");
   }
 
@@ -3795,13 +3798,21 @@
     const runtime = document.getElementById("localizationRuntime");
     if (!badge || !statusText || !runtime) return;
 
-    const label = script ? (script.enabled ? t("localizationEnabled") : t("localizationDisabled")) : t("localizationNotInstalled");
+    const runtimeLocalization = Boolean(state?.system?.is_macos)
+      || localizationPatchStatus?.strategy === "runtime_script_and_locale_config";
+    const localizationActive = Boolean(script?.enabled)
+      && (!runtimeLocalization || lastLaunchResult?.cdp_injected === true);
+    const label = script
+      ? script.enabled
+        ? t(localizationActive ? "localizationEnabled" : "localizationConfigured")
+        : t("localizationDisabled")
+      : t("localizationNotInstalled");
     badge.textContent = label;
     badge.classList.toggle("ok", Boolean(script?.enabled));
     badge.classList.toggle("warn", Boolean(script && !script.enabled));
     statusText.textContent = label;
     runtime.textContent = script?.enabled
-      ? localizationPatchStatus?.strategy === "runtime_script_and_locale_config"
+      ? runtimeLocalization
         ? t("localizationRuntimeSafe")
         : t("localizationResourcePatch")
       : liveInjectionLabel(lastLaunchResult, state?.install);

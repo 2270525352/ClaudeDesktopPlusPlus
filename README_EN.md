@@ -76,6 +76,7 @@ After installing `Claude++`:
 - `v0.1.54` fixes the macOS "app is damaged" error caused by the legacy localization patch modifying `Claude.app`; localization now uses runtime injection with signature validation, exact legacy-patch rollback, and official-installer repair.
 - `v0.1.55` prioritizes the Claude++ update check at startup and shows the current and latest versions in an upgrade-now-or-later prompt.
 - `v0.1.56` switches macOS Claude Desktop installation to the official Universal DMG and renders platform-specific System Readiness checks for Windows and macOS.
+- `v0.1.57` fixes false-positive Claude Desktop launches and localization status on macOS by using LaunchServices, matching the real app process, and separating configured localization from an active runtime injection.
 - `v0.1.50` makes Claude Desktop startup responsive: launch work runs off the UI thread, and current Windows releases use the working 3P configuration path without repeating a known-failing CDP fallback.
 - `v0.1.49` adds live progress bars for Claude Desktop and Claude++ updates, fixes the hidden PowerShell redirect `exit 1`, requests administrator approval when Windows installation needs it, and surfaces detailed failures.
 - `v0.1.48` fixes latest-version redirect parsing, checks for updates automatically at startup, and surfaces update-check failures in the version card.
