@@ -181,6 +181,16 @@
                     <div><dt data-i18n="latestVersion">最新版本</dt><dd id="claudeDesktopLatestVersion">-</dd></div>
                   </dl>
                   <button id="claudeDesktopUpgradeButton" class="text-button primary" type="button" data-action="upgradeClaudeDesktop" data-i18n="upgradeClaudeDesktop">升级 Claude Desktop</button>
+                  <div id="claudeDesktopProgress" class="update-progress" hidden>
+                    <div class="update-progress-head">
+                      <span id="claudeDesktopProgressLabel">准备升级</span>
+                      <strong id="claudeDesktopProgressPercent">0%</strong>
+                    </div>
+                    <div id="claudeDesktopProgressTrack" class="update-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                      <span id="claudeDesktopProgressFill"></span>
+                    </div>
+                    <small id="claudeDesktopProgressDetail">-</small>
+                  </div>
                 </article>
                 <article class="version-card">
                   <div class="version-card-head">
@@ -192,6 +202,16 @@
                     <div><dt data-i18n="latestVersion">最新版本</dt><dd id="claudePlusLatestVersion">-</dd></div>
                   </dl>
                   <button class="text-button" type="button" data-action="upgradeClaudePlus" data-i18n="upgradeClaudePlus">升级 Claude++</button>
+                  <div id="claudePlusProgress" class="update-progress" hidden>
+                    <div class="update-progress-head">
+                      <span id="claudePlusProgressLabel">准备升级</span>
+                      <strong id="claudePlusProgressPercent">0%</strong>
+                    </div>
+                    <div id="claudePlusProgressTrack" class="update-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                      <span id="claudePlusProgressFill"></span>
+                    </div>
+                    <small id="claudePlusProgressDetail">-</small>
+                  </div>
                 </article>
               </div>
             </section>

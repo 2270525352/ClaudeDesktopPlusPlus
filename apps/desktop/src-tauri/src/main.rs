@@ -19,7 +19,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 use uuid::Uuid;
 
@@ -58,6 +58,7 @@ const CLAUDE_PLUS_GITHUB_RELEASE_API: &str =
     "https://api.github.com/repos/2270525352/ClaudeDesktopPlusPlus/releases/latest";
 const CLAUDE_PLUS_GITHUB_RELEASES_URL: &str =
     "https://github.com/2270525352/ClaudeDesktopPlusPlus/releases";
+const UPDATE_PROGRESS_EVENT: &str = "update-progress";
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -397,6 +398,16 @@ struct UpdateActionResult {
     status: Option<UpdateStatus>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct UpdateProgress {
+    operation: String,
+    phase: String,
+    percent: u8,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+    message: String,
+}
+
 #[derive(Debug, Default, Deserialize)]
 struct WindowsReadinessSnapshot {
     is_admin: Option<bool>,
@@ -436,6 +447,105 @@ struct SystemActionResult {
     reboot_required: bool,
     downloaded_path: Option<String>,
     system: SystemReadiness,
+}
+
+trait UpdateOutcome {
+    fn update_ok(&self) -> bool;
+    fn update_success_phase(&self) -> &'static str;
+    fn update_message(&self) -> String;
+}
+
+impl UpdateOutcome for SystemActionResult {
+    fn update_ok(&self) -> bool {
+        self.ok
+    }
+
+    fn update_success_phase(&self) -> &'static str {
+        if self.exit_code.is_none() && self.downloaded_path.is_some() {
+            "installer_opened"
+        } else {
+            "completed"
+        }
+    }
+
+    fn update_message(&self) -> String {
+        action_progress_message(&self.message, &self.stderr)
+    }
+}
+
+impl UpdateOutcome for UpdateActionResult {
+    fn update_ok(&self) -> bool {
+        self.ok
+    }
+
+    fn update_success_phase(&self) -> &'static str {
+        if self.exit_code.is_none() && self.downloaded_path.is_some() {
+            "installer_opened"
+        } else {
+            "completed"
+        }
+    }
+
+    fn update_message(&self) -> String {
+        action_progress_message(&self.message, &self.stderr)
+    }
+}
+
+fn action_progress_message(message: &str, stderr: &str) -> String {
+    stderr
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| line.trim().to_string())
+        .unwrap_or_else(|| message.to_string())
+}
+
+fn emit_update_progress(
+    app: Option<&tauri::AppHandle>,
+    operation: &str,
+    phase: &str,
+    percent: u8,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+    message: &str,
+) {
+    let Some(app) = app else {
+        return;
+    };
+    let _ = app.emit(
+        UPDATE_PROGRESS_EVENT,
+        UpdateProgress {
+            operation: operation.to_string(),
+            phase: phase.to_string(),
+            percent: percent.min(100),
+            downloaded_bytes,
+            total_bytes,
+            message: message.to_string(),
+        },
+    );
+}
+
+fn finish_update_progress<T: UpdateOutcome>(
+    app: &tauri::AppHandle,
+    operation: &str,
+    result: &Result<T, String>,
+) {
+    let (phase, message) = match result {
+        Ok(action) if action.update_ok() => {
+            (action.update_success_phase(), action.update_message())
+        }
+        Ok(action) => ("failed", action.update_message()),
+        Err(error) => ("failed", error.clone()),
+    };
+    emit_update_progress(
+        Some(app),
+        operation,
+        phase,
+        100,
+        0,
+        None,
+        &message,
+    );
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -902,17 +1012,26 @@ async fn update_status() -> Result<UpdateStatus, String> {
 }
 
 #[tauri::command]
-async fn upgrade_claude_desktop() -> Result<SystemActionResult, String> {
-    tauri::async_runtime::spawn_blocking(upgrade_claude_desktop_sync)
+async fn upgrade_claude_desktop(app: tauri::AppHandle) -> Result<SystemActionResult, String> {
+    let worker_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        upgrade_claude_desktop_sync(Some(&worker_app))
+    })
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    finish_update_progress(&app, "claude_desktop", &result);
+    result
 }
 
 #[tauri::command]
-async fn upgrade_claude_plus() -> Result<UpdateActionResult, String> {
-    tauri::async_runtime::spawn_blocking(upgrade_claude_plus_sync)
+async fn upgrade_claude_plus(app: tauri::AppHandle) -> Result<UpdateActionResult, String> {
+    let worker_app = app.clone();
+    let result =
+        tauri::async_runtime::spawn_blocking(move || upgrade_claude_plus_sync(Some(&worker_app)))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    finish_update_progress(&app, "claude_plus", &result);
+    result
 }
 
 #[tauri::command]
@@ -1069,19 +1188,32 @@ exit $exitCode
 }
 
 #[tauri::command]
-async fn install_claude_modern() -> Result<SystemActionResult, String> {
-    tauri::async_runtime::spawn_blocking(install_claude_modern_sync)
+async fn install_claude_modern(app: tauri::AppHandle) -> Result<SystemActionResult, String> {
+    let worker_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        install_claude_modern_sync_inner(false, Some(&worker_app))
+    })
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    finish_update_progress(&app, "claude_desktop", &result);
+    result
 }
 
-fn install_claude_modern_sync() -> Result<SystemActionResult, String> {
-    install_claude_modern_sync_inner(false)
-}
-
-fn install_claude_modern_sync_inner(force_upgrade: bool) -> Result<SystemActionResult, String> {
+fn install_claude_modern_sync_inner(
+    force_upgrade: bool,
+    app: Option<&tauri::AppHandle>,
+) -> Result<SystemActionResult, String> {
+    emit_update_progress(
+        app,
+        "claude_desktop",
+        "checking",
+        3,
+        0,
+        None,
+        "Checking Claude Desktop installation",
+    );
     if cfg!(target_os = "macos") {
-        return install_claude_macos_package_sync(force_upgrade);
+        return install_claude_macos_package_sync(force_upgrade, app);
     }
     if !cfg!(target_os = "windows") {
         return Err(
@@ -1105,37 +1237,75 @@ fn install_claude_modern_sync_inner(force_upgrade: bool) -> Result<SystemActionR
         }
     }
 
-    let download_dir = config_path()
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("downloads");
-    fs::create_dir_all(&download_dir).map_err(|error| error.to_string())?;
-    let package_path = download_dir.join("Claude-modern.msix");
+    emit_update_progress(
+        app,
+        "claude_desktop",
+        "resolving",
+        8,
+        0,
+        None,
+        "Resolving the official Claude Desktop package",
+    );
+    let (download_url, latest_version) = resolve_claude_desktop_latest_download()?;
+    let version_label = latest_version.as_deref().unwrap_or("latest");
+    let package_path = downloads_dir()?.join(format!(
+        "Claude-Desktop-{}.msix",
+        sanitize_download_filename(version_label)
+    ));
+    download_url_to_file_with_progress(
+        &download_url,
+        &package_path,
+        |downloaded, total, download_percent| {
+            let overall = 10 + download_percent.unwrap_or(0).saturating_mul(68) / 100;
+            emit_update_progress(
+                app,
+                "claude_desktop",
+                "downloading",
+                overall,
+                downloaded,
+                total,
+                "Downloading Claude Desktop",
+            );
+        },
+    )?;
+    emit_update_progress(
+        app,
+        "claude_desktop",
+        "installing",
+        84,
+        0,
+        None,
+        "Installing the Claude Desktop MSIX package",
+    );
     let package = path_string(&package_path).replace('\'', "''");
     let script = format!(
         r#"
 $ErrorActionPreference = 'Stop'
-$redirect = '{redirect}'
 $package = '{package}'
-$response = Invoke-WebRequest -Uri $redirect -MaximumRedirection 0 -ErrorAction SilentlyContinue
-$location = $response.Headers.Location
-if (-not $location) {{
-  $response = Invoke-WebRequest -Uri $redirect -MaximumRedirection 5 -UseBasicParsing
-  if ($response.BaseResponse.ResponseUri) {{ $location = $response.BaseResponse.ResponseUri.AbsoluteUri }}
-}}
-if (-not $location) {{ throw 'Could not resolve Claude MSIX download URL' }}
-Invoke-WebRequest -Uri $location -OutFile $package -UseBasicParsing
-Add-AppxPackage -Path $package
-Write-Output "Installed Claude modern package from $location"
+Add-AppxPackage -Path $package -ForceApplicationShutdown -ErrorAction Stop
+Write-Output "Installed Claude Desktop package: $package"
 "#,
-        redirect = CLAUDE_DESKTOP_MSIX_REDIRECT_URL
     );
-    let output = run_powershell_script_with_timeout(&script, Duration::from_secs(600))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let exit_code = output.status.code();
-    let ok = output.status.success();
+    let (ok, exit_code, stdout, stderr) = if is_running_as_admin() {
+        let output = run_powershell_script_with_timeout(&script, Duration::from_secs(600))?;
+        (
+            output.status.success(),
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout).to_string(),
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        )
+    } else {
+        emit_update_progress(
+            app,
+            "claude_desktop",
+            "elevating",
+            86,
+            0,
+            None,
+            "Waiting for administrator approval",
+        );
+        run_elevated_powershell_script_with_timeout(&script, Duration::from_secs(600))?
+    };
     Ok(SystemActionResult {
         ok,
         exit_code,
@@ -1156,7 +1326,18 @@ Write-Output "Installed Claude modern package from $location"
     })
 }
 
-fn upgrade_claude_desktop_sync() -> Result<SystemActionResult, String> {
+fn upgrade_claude_desktop_sync(
+    app: Option<&tauri::AppHandle>,
+) -> Result<SystemActionResult, String> {
+    emit_update_progress(
+        app,
+        "claude_desktop",
+        "checking",
+        2,
+        0,
+        None,
+        "Checking for a Claude Desktop update",
+    );
     let check = check_claude_desktop_update();
     if check.current_version.is_some()
         && check.latest_version.is_some()
@@ -1173,11 +1354,12 @@ fn upgrade_claude_desktop_sync() -> Result<SystemActionResult, String> {
             system: system_readiness(),
         });
     }
-    install_claude_modern_sync_inner(true)
+    install_claude_modern_sync_inner(true, app)
 }
 
 fn install_claude_macos_package_sync(
     force_upgrade: bool,
+    app: Option<&tauri::AppHandle>,
 ) -> Result<SystemActionResult, String> {
     if !cfg!(target_os = "macos") {
         return Err("Claude Desktop PKG installation is only supported on macOS".to_string());
@@ -1195,13 +1377,46 @@ fn install_claude_macos_package_sync(
         });
     }
 
+    emit_update_progress(
+        app,
+        "claude_desktop",
+        "resolving",
+        8,
+        0,
+        None,
+        "Resolving the official Claude Desktop package",
+    );
     let (download_url, latest_version) = resolve_claude_desktop_latest_download()?;
     let version_label = latest_version.as_deref().unwrap_or("latest");
     let package_path = downloads_dir()?.join(format!(
         "Claude-Desktop-{}.pkg",
         sanitize_download_filename(version_label)
     ));
-    download_url_to_file(&download_url, &package_path)?;
+    download_url_to_file_with_progress(
+        &download_url,
+        &package_path,
+        |downloaded, total, download_percent| {
+            let overall = 10 + download_percent.unwrap_or(0).saturating_mul(75) / 100;
+            emit_update_progress(
+                app,
+                "claude_desktop",
+                "downloading",
+                overall,
+                downloaded,
+                total,
+                "Downloading Claude Desktop",
+            );
+        },
+    )?;
+    emit_update_progress(
+        app,
+        "claude_desktop",
+        "opening",
+        92,
+        0,
+        None,
+        "Opening the macOS installer",
+    );
     open_downloaded_installer(&package_path)?;
 
     Ok(SystemActionResult {
@@ -1398,7 +1613,18 @@ fn claude_plus_asset_matches_platform(name: &str) -> bool {
     false
 }
 
-fn upgrade_claude_plus_sync() -> Result<UpdateActionResult, String> {
+fn upgrade_claude_plus_sync(
+    app: Option<&tauri::AppHandle>,
+) -> Result<UpdateActionResult, String> {
+    emit_update_progress(
+        app,
+        "claude_plus",
+        "checking",
+        3,
+        0,
+        None,
+        "Checking for a Claude++ update",
+    );
     let status = update_status_sync()?;
     let check = status.claude_plus.clone();
     if !check.update_available {
@@ -1421,7 +1647,31 @@ fn upgrade_claude_plus_sync() -> Result<UpdateActionResult, String> {
         .clone()
         .unwrap_or_else(|| "ClaudeDesktopPlusPlus-update".to_string());
     let download_path = downloads_dir()?.join(sanitize_download_filename(&asset_name));
-    download_url_to_file(&download_url, &download_path)?;
+    download_url_to_file_with_progress(
+        &download_url,
+        &download_path,
+        |downloaded, total, download_percent| {
+            let overall = 8 + download_percent.unwrap_or(0).saturating_mul(80) / 100;
+            emit_update_progress(
+                app,
+                "claude_plus",
+                "downloading",
+                overall,
+                downloaded,
+                total,
+                "Downloading the Claude++ installer",
+            );
+        },
+    )?;
+    emit_update_progress(
+        app,
+        "claude_plus",
+        "opening",
+        94,
+        0,
+        None,
+        "Opening the Claude++ installer",
+    );
     open_downloaded_installer(&download_path)?;
     Ok(UpdateActionResult {
         ok: true,
@@ -1436,6 +1686,18 @@ fn upgrade_claude_plus_sync() -> Result<UpdateActionResult, String> {
 }
 
 fn downloads_dir() -> Result<PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    let download_dir = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            config_path()
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("."))
+        })
+        .join("Claude++")
+        .join("downloads");
+    #[cfg(not(target_os = "windows"))]
     let download_dir = config_path()
         .parent()
         .map(Path::to_path_buf)
@@ -1445,7 +1707,14 @@ fn downloads_dir() -> Result<PathBuf, String> {
     Ok(download_dir)
 }
 
-fn download_url_to_file(url: &str, path: &Path) -> Result<(), String> {
+fn download_url_to_file_with_progress<F>(
+    url: &str,
+    path: &Path,
+    mut on_progress: F,
+) -> Result<(), String>
+where
+    F: FnMut(u64, Option<u64>, Option<u8>),
+{
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(300))
         .build();
@@ -1454,9 +1723,57 @@ fn download_url_to_file(url: &str, path: &Path) -> Result<(), String> {
         .set("User-Agent", "ClaudeDesktopPlusPlus")
         .call()
         .map_err(|error| error.to_string())?;
+    let total_bytes = response
+        .header("content-length")
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0);
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download");
+    let partial_path = path.with_file_name(format!("{file_name}.part"));
     let mut reader = response.into_reader();
-    let mut file = fs::File::create(path).map_err(|error| error.to_string())?;
-    std::io::copy(&mut reader, &mut file).map_err(|error| error.to_string())?;
+    let result = (|| -> Result<(), String> {
+        let mut file = fs::File::create(&partial_path).map_err(|error| error.to_string())?;
+        let mut buffer = [0_u8; 64 * 1024];
+        let mut downloaded = 0_u64;
+        let mut last_percent = None;
+        on_progress(0, total_bytes, Some(0));
+        loop {
+            let count = reader.read(&mut buffer).map_err(|error| error.to_string())?;
+            if count == 0 {
+                break;
+            }
+            file.write_all(&buffer[..count])
+                .map_err(|error| error.to_string())?;
+            downloaded = downloaded.saturating_add(count as u64);
+            let percent = total_bytes.map(|total| {
+                downloaded
+                    .saturating_mul(100)
+                    .checked_div(total)
+                    .unwrap_or(0)
+                    .min(100) as u8
+            });
+            if percent != last_percent || percent.is_none() {
+                on_progress(downloaded, total_bytes, percent);
+                last_percent = percent;
+            }
+        }
+        file.flush().map_err(|error| error.to_string())?;
+        if downloaded == 0 {
+            return Err("downloaded file is empty".to_string());
+        }
+        if path.exists() {
+            fs::remove_file(path).map_err(|error| error.to_string())?;
+        }
+        fs::rename(&partial_path, path).map_err(|error| error.to_string())?;
+        on_progress(downloaded, total_bytes, Some(100));
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&partial_path);
+    }
+    result?;
     Ok(())
 }
 
@@ -4513,6 +4830,93 @@ fn run_powershell_script_with_timeout(
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+}
+
+fn run_elevated_powershell_script_with_timeout(
+    script: &str,
+    timeout: Duration,
+) -> Result<(bool, Option<i32>, String, String), String> {
+    if !cfg!(target_os = "windows") {
+        return Err("Elevated PowerShell is only supported on Windows".to_string());
+    }
+
+    let work_dir = downloads_dir()?.join("elevated");
+    fs::create_dir_all(&work_dir).map_err(|error| error.to_string())?;
+    let action_id = Uuid::new_v4().to_string();
+    let script_path = work_dir.join(format!("{action_id}.ps1"));
+    let stdout_path = work_dir.join(format!("{action_id}.stdout.log"));
+    let stderr_path = work_dir.join(format!("{action_id}.stderr.log"));
+    let stdout_ps = powershell_single_quoted(&path_string(&stdout_path));
+    let stderr_ps = powershell_single_quoted(&path_string(&stderr_path));
+    let wrapped_script = format!(
+        r#"$ErrorActionPreference = 'Stop'
+$__claudePlusUtf8 = New-Object System.Text.UTF8Encoding $false
+[Console]::OutputEncoding = $__claudePlusUtf8
+$OutputEncoding = $__claudePlusUtf8
+try {{
+  (& {{
+{script}
+  }}) 2>&1 | Out-File -LiteralPath {stdout_ps} -Encoding utf8
+  exit 0
+}} catch {{
+  $detail = ($_ | Format-List * -Force | Out-String)
+  if ($_.Exception.InnerException) {{
+    $detail += "`r`nInner error: " + $_.Exception.InnerException.Message
+  }}
+  [IO.File]::WriteAllText({stderr_ps}, $detail, $__claudePlusUtf8)
+  exit 1
+}}
+"#
+    );
+    let mut script_bytes = vec![0xEF, 0xBB, 0xBF];
+    script_bytes.extend_from_slice(wrapped_script.as_bytes());
+    fs::write(&script_path, script_bytes).map_err(|error| error.to_string())?;
+
+    let script_ps = powershell_single_quoted(&path_string(&script_path));
+    let launcher = format!(
+        r#"$ErrorActionPreference = 'Stop'
+try {{
+  $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', {script_ps})
+  $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -Verb RunAs -WindowStyle Hidden -Wait -PassThru
+  exit $process.ExitCode
+}} catch {{
+  Write-Error ("Administrator approval failed: " + $_.Exception.Message)
+  exit 1
+}}
+"#
+    );
+    let output = run_powershell_script_with_timeout(&launcher, timeout);
+    let stdout_file = fs::read_to_string(&stdout_path)
+        .unwrap_or_default()
+        .trim_start_matches('\u{feff}')
+        .to_string();
+    let stderr_file = fs::read_to_string(&stderr_path)
+        .unwrap_or_default()
+        .trim_start_matches('\u{feff}')
+        .to_string();
+    let _ = fs::remove_file(&script_path);
+    let _ = fs::remove_file(&stdout_path);
+    let _ = fs::remove_file(&stderr_path);
+
+    let output = output?;
+    let outer_stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let outer_stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = [stdout_file.trim(), outer_stdout.trim()]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let stderr = [stderr_file.trim(), outer_stderr.trim()]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok((
+        output.status.success(),
+        output.status.code(),
+        stdout,
+        stderr,
+    ))
 }
 
 fn hide_child_console(command: &mut Command) {

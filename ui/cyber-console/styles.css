@@ -899,6 +899,76 @@ a.text-button {
   box-shadow: inset 0 0 20px rgba(66, 255, 155, 0.04);
 }
 
+.update-progress {
+  display: grid;
+  gap: 7px;
+  padding-top: 2px;
+}
+
+.update-progress[hidden] {
+  display: none;
+}
+
+.update-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--cyan);
+  font-size: 11px;
+}
+
+.update-progress-head strong {
+  color: var(--green);
+  font-size: 11px;
+}
+
+.update-progress-track {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(32, 231, 255, 0.36);
+  background: rgba(0, 4, 7, 0.9);
+}
+
+.update-progress-track span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--green);
+  box-shadow: 0 0 12px rgba(66, 255, 155, 0.62);
+  transition: width 0.3s ease;
+}
+
+.update-progress small {
+  min-height: 16px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.update-progress.completed .update-progress-head,
+.update-progress.completed .update-progress-head strong {
+  color: var(--green);
+}
+
+.update-progress.failed .update-progress-head,
+.update-progress.failed .update-progress-head strong,
+.update-progress.failed small {
+  color: var(--red);
+}
+
+.update-progress.failed .update-progress-track {
+  border-color: rgba(255, 59, 107, 0.58);
+}
+
+.update-progress.failed .update-progress-track span {
+  background: var(--red);
+  box-shadow: 0 0 12px rgba(255, 59, 107, 0.56);
+}
+
 .version-card-head {
   display: flex;
   align-items: center;

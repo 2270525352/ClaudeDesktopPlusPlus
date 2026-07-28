@@ -8,6 +8,7 @@
   let height = 0;
   let rainTimer = null;
   let visualFxEnabled = window.localStorage.getItem("claude-plus-visual-fx") === "on";
+  const UPDATE_PROGRESS_EVENT = "update-progress";
 
   const translations = {
     zh: {
@@ -63,6 +64,18 @@
       updateActionRunning: "正在下载并启动安装器...",
       updateActionOk: "升级操作完成：{message}",
       updateActionFailed: "升级操作失败：{message}",
+      updateProgressPreparing: "准备升级",
+      updateProgressChecking: "检查版本",
+      updateProgressResolving: "解析下载地址",
+      updateProgressDownloading: "下载安装包",
+      updateProgressElevating: "等待管理员授权",
+      updateProgressInstalling: "安装更新",
+      updateProgressOpening: "打开安装器",
+      updateProgressInstallerOpened: "安装器已打开",
+      updateProgressCompleted: "升级流程完成",
+      updateProgressFailed: "升级失败",
+      updateProgressBytes: "{downloaded} / {total}",
+      updateProgressBytesUnknown: "已下载 {downloaded}",
       windowsStatus: "Windows 版本",
       adminStatus: "管理员权限",
       firmwareVirtualization: "固件虚拟化",
@@ -552,6 +565,18 @@
       updateActionRunning: "Downloading and opening installer...",
       updateActionOk: "Update action finished: {message}",
       updateActionFailed: "Update action failed: {message}",
+      updateProgressPreparing: "Preparing update",
+      updateProgressChecking: "Checking version",
+      updateProgressResolving: "Resolving download",
+      updateProgressDownloading: "Downloading installer",
+      updateProgressElevating: "Waiting for administrator approval",
+      updateProgressInstalling: "Installing update",
+      updateProgressOpening: "Opening installer",
+      updateProgressInstallerOpened: "Installer opened",
+      updateProgressCompleted: "Update flow completed",
+      updateProgressFailed: "Update failed",
+      updateProgressBytes: "{downloaded} / {total}",
+      updateProgressBytesUnknown: "Downloaded {downloaded}",
       windowsStatus: "Windows Version",
       adminStatus: "Administrator",
       firmwareVirtualization: "Firmware Virtualization",
@@ -1266,6 +1291,8 @@
   let updateStatus = null;
   let updateLoading = false;
   let updateActionLoading = false;
+  let updateProgressUnlisten = null;
+  const lastUpdateProgress = new Map();
   let overviewDiagnosticsStarted = false;
   let overviewDiagnosticsLoading = false;
   let officialPluginSearchQuery = "";
@@ -1370,6 +1397,80 @@
     return (tauri.core?.invoke ? tauri.core.invoke(command, args) : tauri.invoke(command, args));
   }
 
+  function updateProgressPrefix(operation) {
+    if (operation === "claude_desktop") return "claudeDesktop";
+    if (operation === "claude_plus") return "claudePlus";
+    return null;
+  }
+
+  function renderUpdateProgress(progress) {
+    const prefix = updateProgressPrefix(progress?.operation);
+    if (!prefix) return;
+    lastUpdateProgress.set(progress.operation, progress);
+    const root = document.getElementById(`${prefix}Progress`);
+    const track = document.getElementById(`${prefix}ProgressTrack`);
+    const fill = document.getElementById(`${prefix}ProgressFill`);
+    const label = document.getElementById(`${prefix}ProgressLabel`);
+    const percentText = document.getElementById(`${prefix}ProgressPercent`);
+    const detail = document.getElementById(`${prefix}ProgressDetail`);
+    if (!root || !track || !fill || !label || !percentText || !detail) return;
+
+    const phase = String(progress?.phase || "preparing");
+    const phaseKeys = {
+      preparing: "updateProgressPreparing",
+      checking: "updateProgressChecking",
+      resolving: "updateProgressResolving",
+      downloading: "updateProgressDownloading",
+      elevating: "updateProgressElevating",
+      installing: "updateProgressInstalling",
+      opening: "updateProgressOpening",
+      installer_opened: "updateProgressInstallerOpened",
+      completed: "updateProgressCompleted",
+      failed: "updateProgressFailed",
+    };
+    const percent = Math.max(0, Math.min(100, Number(progress?.percent) || 0));
+    root.hidden = false;
+    root.className = `update-progress${phase === "failed" ? " failed" : phase === "completed" || phase === "installer_opened" ? " completed" : ""}`;
+    label.textContent = t(phaseKeys[phase] || "updateProgressPreparing");
+    percentText.textContent = `${Math.round(percent)}%`;
+    fill.style.width = `${percent}%`;
+    track.setAttribute("aria-valuenow", String(Math.round(percent)));
+
+    const downloaded = Number(progress?.downloaded_bytes) || 0;
+    const total = Number(progress?.total_bytes) || 0;
+    if (phase === "downloading" && downloaded > 0) {
+      detail.textContent = total > 0
+        ? t("updateProgressBytes", { downloaded: formatBytes(downloaded), total: formatBytes(total) })
+        : t("updateProgressBytesUnknown", { downloaded: formatBytes(downloaded) });
+    } else {
+      detail.textContent = progress?.message || "-";
+    }
+  }
+
+  function beginUpdateProgress(operation) {
+    renderUpdateProgress({
+      operation,
+      phase: "preparing",
+      percent: 0,
+      downloaded_bytes: 0,
+      total_bytes: null,
+      message: t("updateProgressPreparing"),
+    });
+  }
+
+  async function setupUpdateProgressListener() {
+    if (updateProgressUnlisten) return;
+    const listen = window.__TAURI__?.event?.listen;
+    if (!listen) return;
+    try {
+      updateProgressUnlisten = await listen(UPDATE_PROGRESS_EVENT, (event) => {
+        renderUpdateProgress(event?.payload);
+      });
+    } catch (error) {
+      log("WARN", t("commandFailed", { error: String(error) }));
+    }
+  }
+
   function log(level, message) {
     showNotice(level, message);
     showToast(level, message);
@@ -1439,6 +1540,7 @@
     const activePage = document.querySelector(".nav-item.active")?.getAttribute("data-page") || "overview";
     document.getElementById("pageTitle").textContent = t(pageTitles[activePage]);
     renderState();
+    lastUpdateProgress.forEach((progress) => renderUpdateProgress(progress));
   }
 
   function setPage(page) {
@@ -3562,6 +3664,9 @@
   }
 
   async function runSystemCommand(command) {
+    if (command === "install_claude_modern" || command === "upgrade_claude_desktop") {
+      beginUpdateProgress("claude_desktop");
+    }
     const buttons = Array.from(document.querySelectorAll(".system-actions .text-button, .version-panel .text-button"));
     buttons.forEach((button) => {
       button.disabled = true;
@@ -3587,6 +3692,7 @@
 
   async function runUpdateCommand(command) {
     if (updateActionLoading) return;
+    beginUpdateProgress("claude_plus");
     updateActionLoading = true;
     const buttons = Array.from(document.querySelectorAll(".system-actions .text-button, .version-panel .text-button"));
     buttons.forEach((button) => {
@@ -4037,5 +4143,6 @@
   applyLocale("zh");
   document.getElementById("bridgeState").textContent = t("bridgeChecking");
   log("TRACE", "Claude++ Control Tower online");
+  setupUpdateProgressListener();
   refreshState({ silent: true });
 })();
