@@ -489,6 +489,7 @@
               <div class="button-row">
                 <button class="text-button primary history-repair-action" id="historyRepairAutoButton" type="button" data-action="repairHistoryAuto" data-i18n="historyRepairOneClick">一键修复</button>
                 <button class="text-button" type="button" data-action="refreshHistory" data-i18n="historyRefresh">重新扫描</button>
+                <button class="text-button" type="button" data-action="resetHistory" data-i18n="historyReset">重置状态</button>
               </div>
             </div>
             <div class="history-one-click">
@@ -628,8 +629,10 @@
 
           <div class="model-discovery-bar">
             <button class="text-button" type="button" data-action="discoverProviderModels" data-i18n="discoverModels">获取模型</button>
+            <button id="openModelPickerButton" class="text-button" type="button" data-action="openModelPicker" data-i18n="chooseModels" disabled>选择模型</button>
             <p id="providerModelDiscoveryStatus" class="bridge-state" data-i18n="modelDiscoveryStatusIdle">根据 Base URL 和 API Key 自动获取模型。</p>
           </div>
+          <p id="providerModelSelectionSummary" class="bridge-state"></p>
 
           <section id="mappingEditor" class="mapping-editor">
             <div class="mapping-editor-head">
@@ -648,6 +651,28 @@
             <button class="text-button" type="button" data-action="cancelProviderEdit" data-i18n="cancelEdit">取消编辑</button>
           </div>
         </form>
+      </div>
+    </section>
+    <section id="modelPickerModal" class="modal-backdrop nested-modal" hidden>
+      <div class="modal-shell model-picker-modal" role="dialog" aria-modal="true" aria-labelledby="modelPickerTitle">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">MODEL CATALOG</p>
+            <h3 id="modelPickerTitle" data-i18n="modelPickerTitle">选择模型</h3>
+          </div>
+          <button class="text-button" type="button" data-action="cancelModelPicker" data-i18n="cancelEdit">取消</button>
+        </div>
+        <div class="model-picker-toolbar">
+          <input id="modelPickerSearch" type="search" data-i18n-placeholder="modelPickerSearch" placeholder="搜索模型" autocomplete="off" />
+          <button class="text-button" type="button" data-action="selectAllModels" data-i18n="selectAllModels">全选</button>
+          <button class="text-button" type="button" data-action="clearAllModels" data-i18n="clearAllModels">清空</button>
+        </div>
+        <p class="bridge-state" data-i18n="modelPickerHint">只勾选需要显示在 Claude Desktop 中的模型；1M 仅在上游模型确实支持时开启。</p>
+        <div id="modelPickerList" class="model-picker-list"></div>
+        <div class="modal-actions">
+          <button class="text-button primary" type="button" data-action="confirmModelPicker" data-i18n="confirmModelSelection">应用选择</button>
+          <button class="text-button" type="button" data-action="cancelModelPicker" data-i18n="cancelEdit">取消</button>
+        </div>
       </div>
     </section>
     <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="false"></div>

@@ -306,6 +306,18 @@
       modelDiscoveryStatusIdle: "根据 Base URL 和 API Key 自动获取模型。",
       modelDiscoveryOk: "已获取 {count} 个模型：{models}",
       modelDiscoveryFailed: "获取模型失败：{error}",
+      chooseModels: "选择模型",
+      modelPickerTitle: "选择需要的模型",
+      modelPickerSearch: "搜索模型",
+      modelPickerHint: "只勾选需要显示在 Claude Desktop 中的模型；1M 仅在上游模型确实支持时开启。",
+      selectAllModels: "全选",
+      clearAllModels: "清空",
+      confirmModelSelection: "应用选择",
+      selectedModelsSummary: "已选择 {selected} / {total} 个模型，其中 {longContext} 个启用 1M",
+      noModelsSelected: "尚未选择模型",
+      selectAtLeastOneModel: "请至少选择一个需要使用的模型",
+      openAiModelSelectionLimit: "OpenAI / Codex 映射最多选择 9 个模型",
+      modelSupports1m: "1M",
       mappingClaudeRoute: "Claude 路由",
       mappingTargetModel: "真实模型",
       mappingLabel: "显示名",
@@ -442,6 +454,7 @@
       accountBoundary: "Cowork、Code、浏览器控制和插件市场能力请在“内置能力”页面统一启用。",
       historyTitle: "一键修复历史对话",
       historyRefresh: "重新扫描",
+      historyReset: "重置状态",
       historyTarget: "修复目标",
       historyBackupRoot: "备份目录",
       historyRecommendedSource: "推荐来源",
@@ -467,6 +480,7 @@
       historyRepairFailed: "历史修复失败：{error}",
       historyBoundary: "只修复本机缓存和工作会话；云端账号历史仍由 Claude 官方账号决定。",
       historyScanDone: "历史来源已重新扫描",
+      historyResetDone: "历史修复状态已重置",
       historyScanIdle: "尚未扫描，点击重新扫描获取历史来源。",
       recommendationsTitle: "独家赞助商",
       recommendationsHint: "推荐页用于展示赞助商内容；AI 快捷配置已统一移动到 API 配置页面。",
@@ -808,6 +822,18 @@
       modelDiscoveryStatusIdle: "Fetch models from the Base URL and API key.",
       modelDiscoveryOk: "Fetched {count} model(s): {models}",
       modelDiscoveryFailed: "Model discovery failed: {error}",
+      chooseModels: "Choose Models",
+      modelPickerTitle: "Choose Models",
+      modelPickerSearch: "Search models",
+      modelPickerHint: "Only selected models appear in Claude Desktop. Enable 1M only when the upstream model actually supports it.",
+      selectAllModels: "Select All",
+      clearAllModels: "Clear",
+      confirmModelSelection: "Apply Selection",
+      selectedModelsSummary: "{selected} / {total} models selected; {longContext} with 1M enabled",
+      noModelsSelected: "No models selected",
+      selectAtLeastOneModel: "Select at least one model to continue",
+      openAiModelSelectionLimit: "OpenAI / Codex mapping supports up to 9 selected models",
+      modelSupports1m: "1M",
       mappingClaudeRoute: "Claude Route",
       mappingTargetModel: "Target Model",
       mappingLabel: "Display Name",
@@ -944,6 +970,7 @@
       accountBoundary: "Manage Cowork, Code, browser control, and plugin marketplace capabilities from the Built-in Capabilities page.",
       historyTitle: "One-Click History Repair",
       historyRefresh: "Rescan",
+      historyReset: "Reset State",
       historyTarget: "Repair Target",
       historyBackupRoot: "Backup Directory",
       historyRecommendedSource: "Recommended Source",
@@ -969,6 +996,7 @@
       historyRepairFailed: "History repair failed: {error}",
       historyBoundary: "This only repairs local cache and workspace sessions; cloud history is still determined by the official Claude account.",
       historyScanDone: "History sources rescanned",
+      historyResetDone: "History repair state reset",
       historyScanIdle: "Not scanned yet. Click Rescan to load history sources.",
       recommendationsTitle: "Exclusive Sponsor",
       recommendationsHint: "The Recommended page is reserved for sponsor content. AI quick configs now live in API Config.",
@@ -1300,6 +1328,9 @@
   let overviewDiagnosticsLoading = false;
   let officialPluginSearchQuery = "";
   let officialPluginVisibleLimit = 12;
+  let providerModelCatalog = [];
+  let discoveredModelMappings = [];
+  let providerModelPickerSnapshot = null;
   const providerTestResults = new Map();
   const terminal = document.getElementById("terminalWindow");
   const noticeBar = document.getElementById("noticeBar");
@@ -1672,7 +1703,7 @@
       state.gateway = await invoke("gateway_status");
     } catch (error) {
       state.gateway = {
-        enabled: state.config?.gateway?.enabled ?? true,
+        enabled: state.config?.gateway?.enabled ?? false,
         running: false,
         url: `http://127.0.0.1:${state.config?.gateway?.port || 49331}`,
         port: state.config?.gateway?.port || 49331,
@@ -2950,8 +2981,19 @@
     const mappings = provider?.model_mappings?.length
       ? provider.model_mappings
       : [];
+    const selectedModels = provider?.selected_models?.length
+      ? provider.selected_models
+      : mappings.map((mapping) => ({
+          id: mapping.target_model,
+          label: mapping.label || mapping.target_model,
+          enabled: mapping.enabled !== false,
+          supports_1m: Boolean(mapping.supports_1m),
+        }));
+    providerModelCatalog = selectedModels.map(normalizeProviderModel).filter(Boolean);
+    discoveredModelMappings = mappings.map((mapping) => ({ ...mapping }));
     renderMappingRows(mappings);
     syncMappingVisibility();
+    renderModelSelectionSummary();
     setModelDiscoveryStatus(t("modelDiscoveryStatusIdle"));
 
     document.getElementById("providerModalTitle").textContent = provider ? t("editingProvider") : t("providerModalTitle");
@@ -2973,6 +3015,142 @@
     status.classList.toggle("ok", level === "ok");
     status.classList.toggle("warn", level === "warn");
     status.classList.toggle("err", level === "err");
+  }
+
+  function normalizeProviderModel(model) {
+    const id = String(model?.id || model?.target_model || "").trim();
+    if (!id) return null;
+    return {
+      id,
+      label: String(model?.label || id).trim() || id,
+      enabled: model?.enabled !== false,
+      supports_1m: Boolean(model?.supports_1m),
+    };
+  }
+
+  function selectedProviderModels() {
+    return providerModelCatalog.filter((model) => model.enabled);
+  }
+
+  function renderModelSelectionSummary() {
+    const summary = document.getElementById("providerModelSelectionSummary");
+    const button = document.getElementById("openModelPickerButton");
+    const selected = selectedProviderModels();
+    if (summary) {
+      summary.textContent = providerModelCatalog.length
+        ? t("selectedModelsSummary", {
+            selected: selected.length,
+            total: providerModelCatalog.length,
+            longContext: selected.filter((model) => model.supports_1m).length,
+          })
+        : t("noModelsSelected");
+    }
+    if (button) {
+      button.disabled = !providerModelCatalog.length;
+    }
+  }
+
+  function renderModelPicker() {
+    const list = document.getElementById("modelPickerList");
+    if (!list) return;
+    const query = String(document.getElementById("modelPickerSearch")?.value || "").trim().toLowerCase();
+    list.replaceChildren();
+    providerModelCatalog
+      .filter((model) => !query || `${model.id} ${model.label}`.toLowerCase().includes(query))
+      .forEach((model) => {
+        const row = document.createElement("div");
+        row.className = "model-picker-row";
+
+        const selected = document.createElement("input");
+        selected.type = "checkbox";
+        selected.checked = model.enabled;
+        selected.setAttribute("aria-label", model.label);
+        selected.addEventListener("change", () => {
+          model.enabled = selected.checked;
+          context.disabled = !model.enabled;
+          renderModelSelectionSummary();
+        });
+
+        const details = document.createElement("span");
+        const title = document.createElement("strong");
+        title.textContent = model.label;
+        const id = document.createElement("code");
+        id.textContent = model.id;
+        details.append(title, id);
+
+        const contextLabel = document.createElement("span");
+        contextLabel.className = "model-context-toggle";
+        const context = document.createElement("input");
+        context.type = "checkbox";
+        context.checked = model.supports_1m;
+        context.disabled = !model.enabled;
+        context.setAttribute("aria-label", `${model.label} ${t("modelSupports1m")}`);
+        context.addEventListener("change", () => {
+          model.supports_1m = context.checked;
+          renderModelSelectionSummary();
+        });
+        const contextText = document.createElement("span");
+        contextText.textContent = t("modelSupports1m");
+        contextLabel.append(context, contextText);
+        row.append(selected, details, contextLabel);
+        list.appendChild(row);
+      });
+  }
+
+  function openModelPicker() {
+    if (!providerModelCatalog.length) {
+      log("WARN", t("modelDiscoveryStatusIdle"));
+      return;
+    }
+    const modal = document.getElementById("modelPickerModal");
+    if (modal) modal.hidden = false;
+    providerModelPickerSnapshot = providerModelCatalog.map((model) => ({ ...model }));
+    const search = document.getElementById("modelPickerSearch");
+    if (search) search.value = "";
+    renderModelPicker();
+  }
+
+  function closeModelPicker({ restore = false } = {}) {
+    if (restore && providerModelPickerSnapshot) {
+      providerModelCatalog = providerModelPickerSnapshot.map((model) => ({ ...model }));
+      renderModelSelectionSummary();
+    }
+    providerModelPickerSnapshot = null;
+    const modal = document.getElementById("modelPickerModal");
+    if (modal) modal.hidden = true;
+  }
+
+  function collectSelectedModels() {
+    return providerModelCatalog.map((model) => ({ ...model }));
+  }
+
+  function applySelectedModelsToMappings() {
+    const form = document.getElementById("providerForm");
+    if (formField(form, "protocol").value !== "openai") return;
+    const selected = selectedProviderModels();
+    const routeNames = [
+      "claude-opus-4-5",
+      "claude-sonnet-4-5",
+      "claude-haiku-4-5",
+      "anthropic/claude-opus-4-5",
+      "anthropic/claude-sonnet-4-5",
+      "anthropic/claude-haiku-4-5",
+      "claude-opus-4",
+      "claude-sonnet-4",
+      "claude-haiku-4",
+    ];
+    const known = new Map(discoveredModelMappings.map((mapping) => [mapping.target_model, mapping]));
+    const mappings = selected.slice(0, routeNames.length).map((model, index) => {
+      const mapping = known.get(model.id);
+      return {
+        claude_route: mapping?.claude_route || routeNames[index],
+        target_model: model.id,
+        label: model.label,
+        enabled: true,
+        supports_1m: model.supports_1m,
+      };
+    });
+    renderMappingRows(mappings);
   }
 
   function renderMappingRows(mappings = []) {
@@ -3013,13 +3191,23 @@
     enabledText.textContent = t("mappingEnabled");
     enabled.append(enabledInput, enabledText);
 
+    const supports1m = document.createElement("label");
+    supports1m.className = "check-line";
+    const supports1mInput = document.createElement("input");
+    supports1mInput.type = "checkbox";
+    supports1mInput.dataset.field = "supports_1m";
+    supports1mInput.checked = Boolean(mapping.supports_1m);
+    const supports1mText = document.createElement("span");
+    supports1mText.textContent = t("modelSupports1m");
+    supports1m.append(supports1mInput, supports1mText);
+
     const remove = document.createElement("button");
     remove.className = "text-button danger";
     remove.type = "button";
     remove.textContent = t("removeMapping");
     remove.addEventListener("click", () => row.remove());
 
-    row.append(enabled, remove);
+    row.append(enabled, supports1m, remove);
     rows.appendChild(row);
   }
 
@@ -3038,6 +3226,7 @@
           target_model: targetModel,
           label: get("label")?.value.trim() || `${targetModel} via ${claudeRoute}`,
           enabled: get("enabled")?.checked ?? true,
+          supports_1m: get("supports_1m")?.checked ?? false,
         };
       })
       .filter((mapping) => mapping.claude_route && mapping.target_model);
@@ -3061,6 +3250,17 @@
       .map((mapping) => `${mapping.claude_route} -> ${mapping.target_model}`)
       .join(" / ");
     return `${t("modelMappingTitle")}: ${summary}${mappings.length > 3 ? ` +${mappings.length - 3}` : ""}`;
+  }
+
+  function providerModelSelectionSummary(provider) {
+    const models = provider.selected_models || [];
+    if (!models.length) return "";
+    const selected = models.filter((model) => model.enabled);
+    return t("selectedModelsSummary", {
+      selected: selected.length,
+      total: models.length,
+      longContext: selected.filter((model) => model.supports_1m).length,
+    });
   }
 
   function fillRecommendationProvider(preset) {
@@ -3369,9 +3569,10 @@
       spans[2].textContent = testResult
         ? `${t("providerTestLocalResult")}: HTTP ${testResult.status || "-"} / ${t("providerModels")}: ${testResult.model_count ?? "-"} / ${testResult.compatibility_message || "-"}`
         : `${t("providerCompatibility")}: -`;
+      const modelLine = providerModelSelectionSummary(provider);
       const mappingLine = modelMappingSummary(provider);
-      spans[3].textContent = mappingLine;
-      spans[3].hidden = !mappingLine;
+      spans[3].textContent = [modelLine, mappingLine].filter(Boolean).join(" / ");
+      spans[3].hidden = !modelLine && !mappingLine;
 
       const actions = document.createElement("div");
       actions.className = "action-stack";
@@ -3553,7 +3754,11 @@
     formField(form, "protocol").value = "anthropic";
     formField(form, "enabled").checked = true;
     formField(form, "api_key").placeholder = "sk-...";
+    providerModelCatalog = [];
+    discoveredModelMappings = [];
     renderMappingRows([]);
+    renderModelSelectionSummary();
+    closeModelPicker();
     closeProviderModal();
     document.getElementById("providerFormTitle").textContent = t("manualProvider");
   }
@@ -3587,6 +3792,7 @@
       base_url: formField(form, "base_url").value.trim(),
       api_key: formField(form, "api_key").value.trim(),
       model_mappings: [],
+      selected_models: collectSelectedModels(),
       enabled: formField(form, "enabled").checked,
     };
     if (!payload.base_url) {
@@ -3597,16 +3803,21 @@
     try {
       const result = await invoke("discover_provider_models", { provider: payload });
       if (!result) return;
-      if (result.protocol === "openai") {
-        renderMappingRows(result.model_mappings || []);
-        syncMappingVisibility();
-      } else {
-        renderMappingRows([]);
-        syncMappingVisibility();
-      }
+      const previous = new Map(providerModelCatalog.map((model) => [model.id, model]));
+      providerModelCatalog = (result.models || [])
+        .map((id) => {
+          const existing = previous.get(id);
+          return normalizeProviderModel(existing || { id, label: id, enabled: true, supports_1m: false });
+        })
+        .filter(Boolean);
+      discoveredModelMappings = (result.model_mappings || []).map((mapping) => ({ ...mapping }));
+      applySelectedModelsToMappings();
+      syncMappingVisibility();
+      renderModelSelectionSummary();
       const models = (result.models || []).slice(0, 8).join(" / ");
       setModelDiscoveryStatus(t("modelDiscoveryOk", { count: result.model_count ?? 0, models }), "ok");
       log("OK", t("modelDiscoveryOk", { count: result.model_count ?? 0, models }));
+      openModelPicker();
     } catch (error) {
       const message = t("modelDiscoveryFailed", { error: String(error) });
       setModelDiscoveryStatus(message, "err");
@@ -3786,6 +3997,20 @@
     await repairHistory(source.path);
   }
 
+  function resetHistoryState() {
+    historyLoaded = false;
+    historyLoading = false;
+    if (state) {
+      state.history = null;
+    }
+    const logBox = document.getElementById("historyRepairLog");
+    if (logBox) {
+      logBox.replaceChildren();
+    }
+    renderHistory(null);
+    log("OK", t("historyResetDone"));
+  }
+
   async function repairHistory(sourcePath) {
     const buttons = Array.from(document.querySelectorAll(".history-repair-action"));
     buttons.forEach((button) => {
@@ -3849,8 +4074,17 @@
         resetProviderForm();
       }
     });
+    document.getElementById("modelPickerModal")?.addEventListener("click", (event) => {
+      if (event.target?.id === "modelPickerModal") {
+        closeModelPicker({ restore: true });
+      }
+    });
+    document.getElementById("modelPickerSearch")?.addEventListener("input", renderModelPicker);
     window.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !document.getElementById("providerModal")?.hidden) {
+      if (event.key !== "Escape") return;
+      if (!document.getElementById("modelPickerModal")?.hidden) {
+        closeModelPicker({ restore: true });
+      } else if (!document.getElementById("providerModal")?.hidden) {
         resetProviderForm();
       }
     });
@@ -3858,6 +4092,7 @@
     providerForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = event.currentTarget;
+      applySelectedModelsToMappings();
       const payload = {
         id: formField(form, "id").value.trim() || undefined,
         name: formField(form, "name").value.trim(),
@@ -3866,6 +4101,7 @@
         base_url: formField(form, "base_url").value.trim(),
         api_key: formField(form, "api_key").value.trim(),
         model_mappings: collectModelMappings(),
+        selected_models: collectSelectedModels(),
         enabled: formField(form, "enabled").checked,
       };
       if (!payload.name) {
@@ -3874,6 +4110,16 @@
       }
       if (!payload.base_url) {
         log("WARN", t("requiredUrl"));
+        return;
+      }
+      if (providerModelCatalog.length && !selectedProviderModels().length) {
+        log("WARN", t("selectAtLeastOneModel"));
+        openModelPicker();
+        return;
+      }
+      if (payload.protocol === "openai" && selectedProviderModels().length > 9) {
+        log("WARN", t("openAiModelSelectionLimit"));
+        openModelPicker();
         return;
       }
       await runCommand("save_api_provider", { provider: payload }, (config) => {
@@ -3905,6 +4151,10 @@
     }
     if (action === "refreshHistory") {
       await refreshHistoryStatus();
+      return;
+    }
+    if (action === "resetHistory") {
+      resetHistoryState();
       return;
     }
     if (action === "repairHistoryAuto") {
@@ -4043,6 +4293,34 @@
     }
     if (action === "discoverProviderModels") {
       await discoverProviderModels();
+      return;
+    }
+    if (action === "openModelPicker") {
+      openModelPicker();
+      return;
+    }
+    if (action === "cancelModelPicker") {
+      closeModelPicker({ restore: true });
+      return;
+    }
+    if (action === "selectAllModels" || action === "clearAllModels") {
+      const enabled = action === "selectAllModels";
+      providerModelCatalog.forEach((model) => {
+        model.enabled = enabled;
+      });
+      renderModelPicker();
+      renderModelSelectionSummary();
+      return;
+    }
+    if (action === "confirmModelPicker") {
+      const protocol = formField(document.getElementById("providerForm"), "protocol").value;
+      if (protocol === "openai" && selectedProviderModels().length > 9) {
+        log("WARN", t("openAiModelSelectionLimit"));
+        return;
+      }
+      applySelectedModelsToMappings();
+      renderModelSelectionSummary();
+      closeModelPicker();
       return;
     }
     if (action === "cancelProviderEdit") {

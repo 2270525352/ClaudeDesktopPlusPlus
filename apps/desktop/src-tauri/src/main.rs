@@ -1,11 +1,11 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 use claude_plus_core::asar_patch::{find_app_asar, stage_preload_patch};
 use claude_plus_core::cdp;
 use claude_plus_core::install::{
     claude_install_override_file, detect_claude_install, ClaudeInstall,
 };
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -123,6 +123,8 @@ struct ApiProvider {
     protocol: String,
     #[serde(default)]
     model_mappings: Vec<ModelMapping>,
+    #[serde(default)]
+    selected_models: Vec<ProviderModel>,
     enabled: bool,
 }
 
@@ -132,6 +134,17 @@ struct ModelMapping {
     target_model: String,
     label: String,
     enabled: bool,
+    #[serde(default)]
+    supports_1m: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ProviderModel {
+    id: String,
+    label: String,
+    enabled: bool,
+    #[serde(default)]
+    supports_1m: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,6 +180,8 @@ struct ProviderInput {
     protocol: Option<String>,
     #[serde(default)]
     model_mappings: Option<Vec<ModelMapping>>,
+    #[serde(default)]
+    selected_models: Option<Vec<ProviderModel>>,
     enabled: bool,
 }
 
@@ -211,6 +226,7 @@ struct PublicProvider {
     base_url: String,
     protocol: String,
     model_mappings: Vec<ModelMapping>,
+    selected_models: Vec<ProviderModel>,
     key_mask: String,
     has_key: bool,
     injectable: bool,
@@ -2010,6 +2026,16 @@ fn save_api_provider(provider: ProviderInput) -> Result<PublicConfig, String> {
             .into_iter()
             .filter_map(normalize_model_mapping)
             .collect(),
+        selected_models: provider
+            .selected_models
+            .unwrap_or_else(|| {
+                existing
+                    .map(|item| item.selected_models.clone())
+                    .unwrap_or_default()
+            })
+            .into_iter()
+            .filter_map(normalize_provider_model)
+            .collect(),
         enabled: provider.enabled,
     };
 
@@ -2102,6 +2128,7 @@ fn discover_provider_models(provider: ProviderInput) -> Result<ModelDiscoveryRes
                 target_model: route.target_model,
                 label: route.label,
                 enabled: true,
+                supports_1m: false,
             })
             .collect()
     } else {
@@ -3966,12 +3993,30 @@ fn build_openai_route_inference_model_entries(provider: &ApiProvider, api_key: &
             json!({
                 "name": route.claude_route,
                 "labelOverride": route.label,
+                "supports1m": route.supports_1m,
             })
         })
         .collect()
 }
 
 fn build_anthropic_inference_model_entries(provider: &ApiProvider, api_key: &str) -> Vec<Value> {
+    let configured = provider
+        .selected_models
+        .iter()
+        .filter(|model| model.enabled)
+        .filter_map(|model| normalize_provider_model(model.clone()))
+        .map(|model| {
+            json!({
+                "name": model.id,
+                "labelOverride": model.label,
+                "supports1m": model.supports_1m,
+            })
+        })
+        .collect::<Vec<_>>();
+    if !configured.is_empty() {
+        return configured;
+    }
+
     let model_ids = discover_provider_model_ids(&provider.base_url, api_key)
         .unwrap_or_else(|_| default_anthropic_model_ids());
     dedupe_model_ids(model_ids)
@@ -3981,6 +4026,7 @@ fn build_anthropic_inference_model_entries(provider: &ApiProvider, api_key: &str
             json!({
                 "name": model_id,
                 "labelOverride": label,
+                "supports1m": false,
             })
         })
         .collect()
@@ -4011,6 +4057,7 @@ struct OpenAiModelRoute {
     claude_route: String,
     target_model: String,
     label: String,
+    supports_1m: bool,
 }
 
 fn openai_route_models_for_provider(
@@ -4034,6 +4081,7 @@ fn openai_route_models_for_provider(
                 },
                 target_model: mapping.target_model,
                 claude_route: mapping.claude_route,
+                supports_1m: mapping.supports_1m,
             })
         })
         .collect::<Vec<_>>();
@@ -4066,6 +4114,7 @@ fn openai_route_models_from_ids(model_ids: Vec<String>) -> Vec<OpenAiModelRoute>
             label: format!("{} via {}", model_label(&target_model), claude_route),
             target_model,
             claude_route: claude_route.to_string(),
+            supports_1m: false,
         })
         .collect()
 }
@@ -5793,6 +5842,7 @@ fn forward_openai_models(provider: &GatewayProvider) -> Result<GatewayForwardRes
         api_key: provider.api_key.clone(),
         protocol: provider.protocol.clone(),
         model_mappings: provider.model_mappings.clone(),
+        selected_models: Vec::new(),
         enabled: true,
     };
     let routes = openai_route_models_for_provider(&provider_for_routes, &provider.api_key);
@@ -6106,7 +6156,7 @@ fn extract_anthropic_text(value: &Value) -> String {
 }
 
 fn select_openai_model(requested_model: &str, provider: &GatewayProvider) -> String {
-    let requested = requested_model.trim();
+    let requested = strip_1m_model_suffix(requested_model.trim());
     let lower = requested.to_ascii_lowercase();
     if !requested.is_empty()
         && !lower.starts_with("claude")
@@ -6127,6 +6177,7 @@ fn select_openai_model(requested_model: &str, provider: &GatewayProvider) -> Str
         api_key: provider.api_key.clone(),
         protocol: provider.protocol.clone(),
         model_mappings: provider.model_mappings.clone(),
+        selected_models: Vec::new(),
         enabled: true,
     };
     let routes = openai_route_models_for_provider(&provider_for_routes, &provider.api_key);
@@ -6164,6 +6215,13 @@ fn select_openai_model(requested_model: &str, provider: &GatewayProvider) -> Str
             .map(|route| route.target_model.clone())
             .unwrap_or_else(|| "gpt-5.5".to_string())
     }
+}
+
+fn strip_1m_model_suffix(model: &str) -> &str {
+    model
+        .strip_suffix("[1m]")
+        .or_else(|| model.strip_suffix("[1M]"))
+        .unwrap_or(model)
 }
 
 fn openai_chat_to_anthropic_message(
@@ -6816,6 +6874,12 @@ fn normalize_config(config: &mut AppConfig) {
             .into_iter()
             .filter_map(normalize_model_mapping)
             .collect();
+        provider.selected_models = provider
+            .selected_models
+            .clone()
+            .into_iter()
+            .filter_map(normalize_provider_model)
+            .collect();
     }
 }
 
@@ -6842,6 +6906,7 @@ fn public_config(config: &AppConfig) -> PublicConfig {
                 base_url: provider.base_url.clone(),
                 protocol: effective_provider_protocol(provider),
                 model_mappings: provider.model_mappings.clone(),
+                selected_models: provider.selected_models.clone(),
                 key_mask: mask_secret(&provider.api_key),
                 has_key: !provider.api_key.is_empty(),
                 injectable: !provider.base_url.is_empty() || !provider.api_key.is_empty(),
@@ -6872,6 +6937,13 @@ struct CcSwitchSync {
 
 fn apply_cc_switch_sync(config: &mut AppConfig) -> Result<(usize, usize, usize, usize), String> {
     let sync = read_cc_switch_providers()?;
+    Ok(merge_cc_switch_sync(config, sync))
+}
+
+fn merge_cc_switch_sync(
+    config: &mut AppConfig,
+    sync: CcSwitchSync,
+) -> (usize, usize, usize, usize) {
     let mut imported = 0;
     let mut updated = 0;
     let skipped = 0;
@@ -6888,7 +6960,15 @@ fn apply_cc_switch_sync(config: &mut AppConfig) -> Result<(usize, usize, usize, 
             .find(|item| item.id == provider.id)
         {
             Some(existing) => {
+                let model_mappings = existing.model_mappings.clone();
+                let selected_models = existing.selected_models.clone();
+                let protocol = existing.protocol.clone();
+                let enabled = existing.enabled;
                 *existing = provider;
+                existing.model_mappings = model_mappings;
+                existing.selected_models = selected_models;
+                existing.protocol = protocol;
+                existing.enabled = enabled;
                 updated += 1;
             }
             None => {
@@ -6912,13 +6992,7 @@ fn apply_cc_switch_sync(config: &mut AppConfig) -> Result<(usize, usize, usize, 
         config.active_provider_id = None;
     }
 
-    let active_is_manual = config
-        .active_provider_id
-        .as_ref()
-        .and_then(|id| config.providers.iter().find(|provider| &provider.id == id))
-        .is_some_and(|provider| provider.source != "cc-switch");
-
-    if !active_is_manual
+    if config.active_provider_id.is_none()
         && sync.current_provider_id.is_some()
         && config
             .providers
@@ -6930,7 +7004,7 @@ fn apply_cc_switch_sync(config: &mut AppConfig) -> Result<(usize, usize, usize, 
         config.active_provider_id = config.providers.first().map(|provider| provider.id.clone());
     }
 
-    Ok((imported, updated, removed, skipped))
+    (imported, updated, removed, skipped)
 }
 
 fn read_cc_switch_providers() -> Result<CcSwitchSync, String> {
@@ -6947,7 +7021,8 @@ fn read_cc_switch_providers() -> Result<CcSwitchSync, String> {
             .and_then(Value::as_str)
             .map(ToString::to_string)
     });
-    let connection = Connection::open(&database).map_err(|error| error.to_string())?;
+    let connection = Connection::open_with_flags(&database, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| error.to_string())?;
     let mut statement = connection
         .prepare(
             "select id, app_type, name, settings_config, is_current, website_url, meta, category \
@@ -7016,6 +7091,7 @@ fn read_cc_switch_providers() -> Result<CcSwitchSync, String> {
             id: format!("cc-switch-{id}"),
             protocol: infer_provider_protocol(&name, &base_url),
             model_mappings: Vec::new(),
+            selected_models: Vec::new(),
             name,
             app_type,
             source: "cc-switch".to_string(),
@@ -8309,6 +8385,25 @@ fn normalize_model_mapping(mapping: ModelMapping) -> Option<ModelMapping> {
         target_model,
         label,
         enabled: mapping.enabled,
+        supports_1m: mapping.supports_1m,
+    })
+}
+
+fn normalize_provider_model(model: ProviderModel) -> Option<ProviderModel> {
+    let id = model.id.trim().to_string();
+    if id.is_empty() {
+        return None;
+    }
+    let label = if model.label.trim().is_empty() {
+        model_label(&id)
+    } else {
+        model.label.trim().to_string()
+    };
+    Some(ProviderModel {
+        id,
+        label,
+        enabled: model.enabled,
+        supports_1m: model.supports_1m,
     })
 }
 
@@ -8759,10 +8854,112 @@ fn run_headless_command() -> bool {
 mod tests {
     use super::*;
 
+    fn test_provider(id: &str, source: &str) -> ApiProvider {
+        ApiProvider {
+            id: id.to_string(),
+            name: id.to_string(),
+            app_type: "claude".to_string(),
+            source: source.to_string(),
+            base_url: "https://example.com".to_string(),
+            api_key: "test-key".to_string(),
+            protocol: PROVIDER_PROTOCOL_ANTHROPIC.to_string(),
+            model_mappings: Vec::new(),
+            selected_models: Vec::new(),
+            enabled: true,
+        }
+    }
+
     #[test]
     fn gateway_defaults_to_direct_mode() {
         assert!(!GatewayConfig::default().enabled);
         assert!(!AppConfig::default().gateway.enabled);
+    }
+
+    #[test]
+    fn selected_models_emit_only_enabled_entries_and_1m_capability() {
+        let mut provider = test_provider("selected", "manual");
+        provider.selected_models = vec![
+            ProviderModel {
+                id: "claude-opus-4-8".to_string(),
+                label: "Opus 4.8".to_string(),
+                enabled: true,
+                supports_1m: true,
+            },
+            ProviderModel {
+                id: "claude-haiku-4-5".to_string(),
+                label: "Haiku 4.5".to_string(),
+                enabled: false,
+                supports_1m: false,
+            },
+        ];
+
+        let models = build_anthropic_inference_model_entries(&provider, "test-key");
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0]["name"], "claude-opus-4-8");
+        assert_eq!(models[0]["supports1m"], true);
+    }
+
+    #[test]
+    fn cc_switch_merge_preserves_local_model_choices_and_active_provider() {
+        let mut config = AppConfig::default();
+        let mut existing = test_provider("cc-switch-a", "cc-switch");
+        existing.protocol = PROVIDER_PROTOCOL_OPENAI.to_string();
+        existing.enabled = false;
+        existing.selected_models = vec![ProviderModel {
+            id: "gpt-5.5".to_string(),
+            label: "GPT-5.5".to_string(),
+            enabled: true,
+            supports_1m: true,
+        }];
+        existing.model_mappings = vec![ModelMapping {
+            claude_route: "claude-opus-4-5".to_string(),
+            target_model: "gpt-5.5".to_string(),
+            label: "GPT-5.5".to_string(),
+            enabled: true,
+            supports_1m: true,
+        }];
+        config.providers.push(existing);
+        config.active_provider_id = Some("cc-switch-a".to_string());
+
+        let mut refreshed = test_provider("cc-switch-a", "cc-switch");
+        refreshed.base_url = "https://updated.example.com".to_string();
+        refreshed.api_key = "updated-key".to_string();
+        let second = test_provider("cc-switch-b", "cc-switch");
+        let result = merge_cc_switch_sync(
+            &mut config,
+            CcSwitchSync {
+                providers: vec![refreshed, second],
+                current_provider_id: Some("cc-switch-b".to_string()),
+            },
+        );
+
+        assert_eq!(result, (1, 1, 0, 0));
+        assert_eq!(config.active_provider_id.as_deref(), Some("cc-switch-a"));
+        let merged = config
+            .providers
+            .iter()
+            .find(|provider| provider.id == "cc-switch-a")
+            .unwrap();
+        assert_eq!(merged.base_url, "https://updated.example.com");
+        assert_eq!(merged.api_key, "updated-key");
+        assert!(!merged.enabled);
+        assert_eq!(merged.protocol, PROVIDER_PROTOCOL_OPENAI);
+        assert_eq!(merged.selected_models.len(), 1);
+        assert!(merged.selected_models[0].supports_1m);
+        assert_eq!(merged.model_mappings.len(), 1);
+    }
+
+    #[test]
+    fn gateway_model_mapping_accepts_1m_suffix() {
+        assert_eq!(
+            strip_1m_model_suffix("claude-opus-4-8[1m]"),
+            "claude-opus-4-8"
+        );
+        assert_eq!(
+            strip_1m_model_suffix("claude-sonnet-4-6[1M]"),
+            "claude-sonnet-4-6"
+        );
     }
 
     #[test]

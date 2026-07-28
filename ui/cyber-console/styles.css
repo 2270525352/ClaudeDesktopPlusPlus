@@ -436,6 +436,10 @@ a.text-button {
   display: none;
 }
 
+.nested-modal {
+  z-index: 40;
+}
+
 .modal-shell {
   width: min(740px, calc(100vw - 36px));
   max-height: min(620px, calc(100vh - 36px));
@@ -482,6 +486,11 @@ a.text-button {
   flex: 1 1 auto;
 }
 
+#providerModelSelectionSummary {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .mapping-editor {
   display: grid;
   gap: 8px;
@@ -512,7 +521,7 @@ a.text-button {
 
 .mapping-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1.05fr) minmax(120px, 1fr) minmax(100px, 0.8fr) auto auto;
+  grid-template-columns: minmax(120px, 1.05fr) minmax(120px, 1fr) minmax(100px, 0.8fr) auto auto auto;
   gap: 8px;
   align-items: end;
   padding: 7px;
@@ -540,6 +549,68 @@ a.text-button {
   justify-content: flex-end;
   gap: 10px;
   padding-top: 4px;
+}
+
+.model-picker-modal {
+  display: grid;
+  gap: 10px;
+  width: min(620px, calc(100vw - 36px));
+  padding: 12px;
+  overflow: hidden;
+}
+
+.model-picker-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+}
+
+.model-picker-list {
+  display: grid;
+  gap: 6px;
+  max-height: min(390px, 52vh);
+  overflow: auto;
+  padding-right: 3px;
+}
+
+.model-picker-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 48px;
+  padding: 7px 9px;
+  border: 1px solid var(--line-soft);
+  background: rgba(2, 10, 14, 0.82);
+}
+
+.model-picker-row > input,
+.model-context-toggle input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+}
+
+.model-picker-row > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.model-picker-row code {
+  overflow: hidden;
+  color: var(--cyan);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-context-toggle {
+  display: inline-flex !important;
+  grid-template-columns: none !important;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  color: var(--green);
 }
 
 .toast {
@@ -1699,8 +1770,17 @@ body.fx-on .led {
 
   .modal-actions,
   .model-discovery-bar,
+  .model-picker-toolbar,
   .mapping-editor-head {
     display: grid;
+  }
+
+  .model-picker-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .model-context-toggle {
+    grid-column: 2;
   }
 }
 
