@@ -50,6 +50,8 @@ const CLAUDE_PLUS_CONFIG_NAME: &str = "Claude++ Provider";
 const LEGACY_CLAUDE_PLUS_CONFIG_NAME: &str = "Claude++ Gateway";
 const OFFICIAL_PLUGIN_MARKETPLACE_NAME: &str = "claude-plugins-official";
 const OFFICIAL_PLUGIN_MARKETPLACE_REPO: &str = "anthropics/claude-plugins-official";
+const OFFICIAL_PLUGIN_MARKETPLACE_GIT_URL: &str =
+    "https://github.com/anthropics/claude-plugins-official.git";
 const CLAUDE_DESKTOP_MSIX_REDIRECT_URL: &str =
     "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect";
 const CLAUDE_DESKTOP_MACOS_DMG_REDIRECT_URL: &str =
@@ -8849,7 +8851,10 @@ fn official_plugins_status_sync() -> OfficialPluginsStatus {
     let featured_plugins = select_featured_plugins(&mut available);
     let mut installed_plugins = installed.drain().collect::<Vec<_>>();
     installed_plugins.sort();
-    let message = if let Some(error) = cli_message {
+    let message = if cli_path.is_none() && marketplace.marketplace_configured {
+        "Official plugin marketplace loaded from the local Git directory. Claude CLI is required only when installing plugins."
+            .to_string()
+    } else if let Some(error) = cli_message {
         format!("Claude CLI marketplace fallback used: {error}")
     } else if marketplace.marketplace_configured {
         "Official plugin marketplace is available.".to_string()
@@ -8876,6 +8881,10 @@ fn official_plugins_status_sync() -> OfficialPluginsStatus {
 }
 
 fn sync_official_plugin_marketplace_sync() -> Result<OfficialPluginActionResult, String> {
+    if claude_cli_path().is_none() {
+        return sync_official_plugin_marketplace_with_git();
+    }
+
     let initial = official_plugins_status_sync();
     let args = if initial.marketplace_configured {
         vec![
@@ -8929,6 +8938,162 @@ fn sync_official_plugin_marketplace_sync() -> Result<OfficialPluginActionResult,
         stderr: combined_stderr,
         status: official_plugins_status_sync(),
     })
+}
+
+fn sync_official_plugin_marketplace_with_git() -> Result<OfficialPluginActionResult, String> {
+    let plugins_root = claude_plugins_root();
+    let marketplace_path = plugins_root
+        .join("marketplaces")
+        .join(OFFICIAL_PLUGIN_MARKETPLACE_NAME);
+    let result = sync_git_marketplace_repository(&marketplace_path);
+    match result {
+        Ok(output) => {
+            let last_updated = official_marketplace_git_timestamp(&marketplace_path)
+                .unwrap_or_else(|| unix_millis().to_string());
+            register_official_marketplace(
+                &plugins_root,
+                &marketplace_path,
+                &last_updated,
+            )?;
+            Ok(OfficialPluginActionResult {
+                ok: true,
+                exit_code: output.status.code().or(Some(0)),
+                message: "Official plugin marketplace synced directly with Git because Claude CLI is not installed. Plugin installation still requires Claude CLI."
+                    .to_string(),
+                stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                status: official_plugins_status_sync(),
+            })
+        }
+        Err(error) => Ok(OfficialPluginActionResult {
+            ok: false,
+            exit_code: None,
+            message: "Official plugin marketplace could not be synced without Claude CLI."
+                .to_string(),
+            stdout: String::new(),
+            stderr: error,
+            status: official_plugins_status_sync(),
+        }),
+    }
+}
+
+fn sync_git_marketplace_repository(
+    marketplace_path: &Path,
+) -> Result<std::process::Output, String> {
+    if git_command_path().is_none() {
+        return Err(
+            "Claude CLI is not installed and Git was not found. Install either Claude Code CLI or Git, then retry."
+                .to_string(),
+        );
+    }
+
+    if marketplace_path.exists() {
+        if !marketplace_path.join(".git").is_dir() {
+            return Err(format!(
+                "The official marketplace directory exists but is not a Git repository: {}",
+                marketplace_path.display()
+            ));
+        }
+        let status = run_git_command(
+            &[
+                "-C".to_string(),
+                path_string(marketplace_path),
+                "status".to_string(),
+                "--porcelain".to_string(),
+            ],
+            Duration::from_secs(15),
+        )?;
+        if !status.status.success() {
+            return Err(format_command_failure(&status));
+        }
+        if !String::from_utf8_lossy(&status.stdout).trim().is_empty() {
+            return Err(format!(
+                "The official marketplace repository contains local changes and was not overwritten: {}",
+                marketplace_path.display()
+            ));
+        }
+        let output = run_git_command(
+            &[
+                "-C".to_string(),
+                path_string(marketplace_path),
+                "pull".to_string(),
+                "--ff-only".to_string(),
+                "--no-rebase".to_string(),
+                "--quiet".to_string(),
+            ],
+            Duration::from_secs(120),
+        )?;
+        if !output.status.success() {
+            return Err(format_command_failure(&output));
+        }
+        return Ok(output);
+    }
+
+    let parent = marketplace_path
+        .parent()
+        .ok_or_else(|| "Official marketplace parent directory was not found".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let output = run_git_command(
+        &[
+            "clone".to_string(),
+            "--depth".to_string(),
+            "1".to_string(),
+            "--quiet".to_string(),
+            OFFICIAL_PLUGIN_MARKETPLACE_GIT_URL.to_string(),
+            path_string(marketplace_path),
+        ],
+        Duration::from_secs(180),
+    )?;
+    if !output.status.success() {
+        return Err(format_command_failure(&output));
+    }
+    Ok(output)
+}
+
+fn register_official_marketplace(
+    plugins_root: &Path,
+    marketplace_path: &Path,
+    last_updated: &str,
+) -> Result<(), String> {
+    let known_path = plugins_root.join("known_marketplaces.json");
+    let mut known = read_json_file(&known_path).unwrap_or_else(|_| json!({}));
+    if !known.is_object() {
+        known = json!({});
+    }
+    let root = known
+        .as_object_mut()
+        .ok_or_else(|| "Official marketplace registry is malformed".to_string())?;
+    root.insert(
+        OFFICIAL_PLUGIN_MARKETPLACE_NAME.to_string(),
+        json!({
+            "source": {
+                "source": "github",
+                "repo": OFFICIAL_PLUGIN_MARKETPLACE_REPO,
+            },
+            "installLocation": path_string(marketplace_path),
+            "lastUpdated": last_updated,
+        }),
+    );
+    write_json_file(&known_path, &known)
+}
+
+fn official_marketplace_git_timestamp(marketplace_path: &Path) -> Option<String> {
+    let output = run_git_command(
+        &[
+            "-C".to_string(),
+            path_string(marketplace_path),
+            "log".to_string(),
+            "-1".to_string(),
+            "--format=%cI".to_string(),
+        ],
+        Duration::from_secs(10),
+    )
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!value.is_empty()).then_some(value)
 }
 
 fn install_official_plugin_sync(plugin: String) -> Result<OfficialPluginActionResult, String> {
@@ -9270,6 +9435,11 @@ fn run_claude_cli(args: &[String]) -> Result<std::process::Output, String> {
 }
 
 fn claude_cli_path() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("CLAUDE_CLI_PATH").map(PathBuf::from) {
+        if path.is_file() {
+            return Some(path);
+        }
+    }
     if cfg!(target_os = "windows") {
         if let Some(appdata) = std::env::var_os("APPDATA") {
             let path = PathBuf::from(appdata).join("npm").join("claude.cmd");
@@ -9293,8 +9463,33 @@ fn claude_cli_path() -> Option<PathBuf> {
         }
         return None;
     }
+
+    if let Some(home) = home_dir() {
+        for relative in [
+            [".local", "bin", "claude"].as_slice(),
+            [".claude", "bin", "claude"].as_slice(),
+            [".npm-global", "bin", "claude"].as_slice(),
+        ] {
+            let path = relative
+                .iter()
+                .fold(home.clone(), |path, part| path.join(*part));
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
+    for candidate in [
+        "/opt/homebrew/bin/claude",
+        "/usr/local/bin/claude",
+        "/opt/local/bin/claude",
+    ] {
+        let path = PathBuf::from(candidate);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
     for candidate in ["claude", "claude-code"] {
-        let mut command = Command::new("which");
+        let mut command = Command::new("/usr/bin/which");
         let output = command
             .arg(candidate)
             .stdin(Stdio::null())
@@ -9311,6 +9506,82 @@ fn claude_cli_path() -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn run_git_command(
+    args: &[String],
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
+    let path = git_command_path().ok_or_else(|| "Git was not found".to_string())?;
+    let mut command = Command::new(path);
+    hide_child_console(&mut command);
+    command
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let started_at = Instant::now();
+    loop {
+        if child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return child.wait_with_output().map_err(|error| error.to_string());
+        }
+        if started_at.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "Git command timed out after {} seconds",
+                timeout.as_secs()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn git_command_path() -> Option<PathBuf> {
+    if cfg!(target_os = "windows") {
+        let mut command = Command::new("where");
+        hide_child_console(&mut command);
+        let output = command
+            .arg("git.exe")
+            .stdin(Stdio::null())
+            .output()
+            .ok()?;
+        if output.status.success() {
+            return String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .map(PathBuf::from);
+        }
+        return None;
+    }
+
+    for candidate in ["/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"] {
+        let path = PathBuf::from(candidate);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    let output = Command::new("/usr/bin/which")
+        .arg("git")
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(PathBuf::from)
 }
 
 fn claude_plugins_root() -> PathBuf {
@@ -9834,6 +10105,25 @@ fn run_headless_command() -> bool {
     }
     if args
         .iter()
+        .any(|arg| arg == "--claude-plus-sync-official-plugins")
+    {
+        match sync_official_plugin_marketplace_sync() {
+            Ok(result) => {
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => println!("{json}"),
+                    Err(error) => eprintln!("Failed to encode official plugin sync result: {error}"),
+                }
+                let _ = std::io::stdout().flush();
+                return true;
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
+    if args
+        .iter()
         .any(|arg| arg == "--claude-plus-uninstall-builtin-skills")
     {
         match uninstall_builtin_skills_sync() {
@@ -9976,6 +10266,49 @@ mod tests {
             macos_claude_process_id_from_lines(&install, Some(103), process_lines),
             Some(103)
         );
+    }
+
+    #[test]
+    fn direct_official_marketplace_registration_uses_claude_registry_schema() {
+        let root = std::env::temp_dir().join(format!(
+            "claude-plus-marketplace-registry-{}",
+            Uuid::new_v4()
+        ));
+        let marketplace = root
+            .join("marketplaces")
+            .join(OFFICIAL_PLUGIN_MARKETPLACE_NAME);
+        fs::create_dir_all(&marketplace).unwrap();
+
+        register_official_marketplace(&root, &marketplace, "2026-07-29T00:00:00Z").unwrap();
+        let registry = read_json_file(&root.join("known_marketplaces.json")).unwrap();
+        let official = &registry[OFFICIAL_PLUGIN_MARKETPLACE_NAME];
+
+        assert_eq!(official["source"]["source"], "github");
+        assert_eq!(
+            official["source"]["repo"],
+            OFFICIAL_PLUGIN_MARKETPLACE_REPO
+        );
+        assert_eq!(
+            official["installLocation"],
+            path_string(&marketplace)
+        );
+        assert_eq!(official["lastUpdated"], "2026-07-29T00:00:00Z");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn direct_marketplace_sync_does_not_overwrite_a_non_git_directory() {
+        let root =
+            std::env::temp_dir().join(format!("claude-plus-marketplace-safe-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let marker = root.join("user-file.txt");
+        fs::write(&marker, "keep").unwrap();
+
+        let error = sync_git_marketplace_repository(&root).unwrap_err();
+
+        assert!(error.contains("not a Git repository"));
+        assert_eq!(fs::read_to_string(&marker).unwrap(), "keep");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

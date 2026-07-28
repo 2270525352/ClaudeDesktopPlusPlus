@@ -79,6 +79,7 @@ ClaudeDesktopPlusPlus（Claude++）是面向 Claude Desktop 的第三方桌面�
 - `v0.1.55` 启动 Claude++ 时优先检查自身版本；发现新版会弹窗显示当前版本和最新版本，并允许立即升级或稍后处理。
 - `v0.1.56` 将 macOS Claude Desktop 安装切换为官方 Universal DMG，并让“系统就绪”按 Windows/macOS 分别展示对应的检查项目。
 - `v0.1.57` 修复 macOS 上 Claude Desktop 假启动和汉化假成功：改用 LaunchServices 启动并校验真实应用进程，补齐官方/3P locale 与应用级语言偏好，汉化状态会区分“已配置”和“已生效”。
+- `v0.1.58` 修复未安装或未探测到 Claude CLI 时无法同步官方插件市场的问题；目录可直接通过 Git 同步，插件安装仍由 Claude CLI 完成。
 - `v0.1.50` 优化 Claude Desktop 启动流畅度：启动任务后台执行，新版 Windows Claude 直接使用 3P 配置启动，不再重复等待已知失败的 CDP 降级链路。
 - `v0.1.49` 为 Claude Desktop 和 Claude++ 升级增加实时进度条；修复隐藏 PowerShell 处理官方重定向时的 `exit 1`，Windows 安装阶段会按需请求管理员授权并显示详细错误。
 - `v0.1.48` 修复官方最新版本重定向解析，并在应用启动后自动执行版本检查；检查失败时会直接显示错误状态。
