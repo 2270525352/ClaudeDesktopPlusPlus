@@ -47,6 +47,7 @@
       updatePanelTitle: "版本升级",
       checkUpdates: "检查更新",
       upgradeClaudeDesktop: "升级 Claude Desktop",
+      installClaudeDesktop: "安装 Claude Desktop",
       upgradeClaudePlus: "升级 Claude++",
       claudeDesktopVersionTitle: "Claude Desktop",
       claudePlusVersionTitle: "Claude++ 控制台",
@@ -54,6 +55,7 @@
       latestVersion: "最新版本",
       updateState: "升级状态",
       updateAvailable: "发现新版本",
+      updateInstallReady: "可安装",
       updateReady: "已是最新",
       updateUnknown: "未检查",
       updateChecking: "正在检查更新...",
@@ -533,6 +535,7 @@
       updatePanelTitle: "Version Updates",
       checkUpdates: "Check Updates",
       upgradeClaudeDesktop: "Upgrade Claude Desktop",
+      installClaudeDesktop: "Install Claude Desktop",
       upgradeClaudePlus: "Upgrade Claude++",
       claudeDesktopVersionTitle: "Claude Desktop",
       claudePlusVersionTitle: "Claude++ Console",
@@ -540,6 +543,7 @@
       latestVersion: "Latest Version",
       updateState: "Update State",
       updateAvailable: "Update available",
+      updateInstallReady: "Ready to install",
       updateReady: "Up to date",
       updateUnknown: "Not checked",
       updateChecking: "Checking updates...",
@@ -1513,8 +1517,11 @@
       hydrateOverviewDiagnostics({ force });
       return;
     }
-    if (page === "system" && (force || !systemLoaded)) {
-      await refreshSystemReadiness();
+    if (page === "system") {
+      const tasks = [];
+      if (force || !systemLoaded) tasks.push(refreshSystemReadiness());
+      if (force || !updateStatus) tasks.push(refreshUpdateStatus());
+      await Promise.allSettled(tasks);
     }
     if (page === "history" && (force || !historyLoaded)) {
       await refreshHistoryStatus();
@@ -2176,6 +2183,17 @@
     setText("claudeDesktopCurrentVersion", desktop.current_version || system.claude_version || "-");
     setText("claudeDesktopLatestVersion", updateLoading ? t("loading") : desktop.latest_version || "-");
     setVersionBadge("claudeDesktopUpdateState", desktop, updateLoading);
+    const desktopButton = document.getElementById("claudeDesktopUpgradeButton");
+    if (desktopButton) {
+      const installed = Boolean(desktop.current_version || system.claude_installed);
+      const versionsComparable = Boolean(desktop.current_version && desktop.latest_version);
+      desktopButton.textContent = installed ? t("upgradeClaudeDesktop") : t("installClaudeDesktop");
+      desktopButton.disabled =
+        updateLoading ||
+        updateActionLoading ||
+        (versionsComparable && !desktop.update_available);
+      desktopButton.title = desktop.message || "";
+    }
     setText("claudePlusCurrentVersion", plus.current_version || state?.app_version || "-");
     setText("claudePlusLatestVersion", updateLoading ? t("loading") : plus.latest_version || "-");
     setVersionBadge("claudePlusUpdateState", plus, updateLoading);
@@ -2190,8 +2208,14 @@
       badge.classList.add("warn");
       return;
     }
-    if (!check || !check.message) {
+    if (!check || !check.message || !check.latest_version) {
       badge.textContent = t("updateUnknown");
+      if (check?.message) badge.classList.add("warn");
+      return;
+    }
+    if (!check.current_version) {
+      badge.textContent = t("updateInstallReady");
+      badge.classList.add("warn");
       return;
     }
     if (check.update_available) {
@@ -3546,6 +3570,7 @@
       buttons.forEach((button) => {
         button.disabled = false;
       });
+      renderVersionUpdates();
     }
   }
 

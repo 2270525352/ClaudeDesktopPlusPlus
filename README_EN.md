@@ -49,9 +49,9 @@ Move beyond limitations introduced by local Gateway forwarding with one-click di
 
 Get the latest build from [GitHub Releases](https://github.com/2270525352/ClaudeDesktopPlusPlus/releases):
 
-- Windows x64: `ClaudeDesktopPlusPlus-*-windows-x64-setup.exe`
-- macOS Apple Silicon: `ClaudeDesktopPlusPlus-*-macos-arm64-*.dmg`
-- macOS Intel: `ClaudeDesktopPlusPlus-*-macos-x64-*.dmg`
+- Windows x64: `ClaudePlus-Windows-x64-Setup.exe`
+- macOS Apple Silicon: `ClaudePlus-macOS-arm64.dmg`
+- macOS Intel: `ClaudePlus-macOS-x64.dmg`
 
 After installing `Claude++`:
 
@@ -69,6 +69,7 @@ After installing `Claude++`:
 - Conversation recovery backs up the target profile first and does not copy sign-in credentials by default.
 - The Windows uninstaller removes 3P routing written by Claude++; the same repair is available from **API Config**.
 - `v0.1.46` adds code signing and DMG signature verification for both macOS ARM64 and Intel x64 builds, fixing the damaged-app warning caused by unsigned downloads.
+- `v0.1.47` uses concise installer names and adds automatic Claude Desktop version checks plus one-click install/update on Windows and macOS.
 
 ## Development
 

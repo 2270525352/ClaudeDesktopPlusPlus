@@ -49,9 +49,9 @@ ClaudeDesktopPlusPlus（Claude++）是面向 Claude Desktop 的第三方桌面�
 
 前往 [GitHub Releases](https://github.com/2270525352/ClaudeDesktopPlusPlus/releases) 下载：
 
-- Windows x64：`ClaudeDesktopPlusPlus-*-windows-x64-setup.exe`
-- macOS Apple Silicon：`ClaudeDesktopPlusPlus-*-macos-arm64-*.dmg`
-- macOS Intel：`ClaudeDesktopPlusPlus-*-macos-x64-*.dmg`
+- Windows x64：`ClaudePlus-Windows-x64-Setup.exe`
+- macOS Apple Silicon：`ClaudePlus-macOS-arm64.dmg`
+- macOS Intel：`ClaudePlus-macOS-x64.dmg`
 
 安装后启动 `Claude++`，建议依次完成：
 
@@ -71,6 +71,7 @@ ClaudeDesktopPlusPlus（Claude++）是面向 Claude Desktop 的第三方桌面�
 - 本次兼容性与卸载恢复改动见 [v0.1.44 修复说明](docs/releases/v0.1.44-fixes.md)。
 - `v0.1.45` 的发布内容见 [v0.1.45 发布说明](docs/releases/v0.1.45.md)。
 - `v0.1.46` 已为 macOS ARM64 和 Intel x64 应用加入代码签名及 DMG 内签名校验，修复浏览器下载后提示应用损坏的问题。
+- `v0.1.47` 使用简短安装包名称，并为 Windows/macOS 增加 Claude Desktop 自动版本检查与一键安装、更新。
 
 ## 开发
 

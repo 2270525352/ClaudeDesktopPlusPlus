@@ -118,16 +118,29 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          find apps/desktop/src-tauri/target -path '*/release/bundle/nsis/*.exe' -type f -print0 | while IFS= read -r -d '' file; do
-            cp "$file" "release-assets/ClaudeDesktopPlusPlus-${{ matrix.name }}-$(basename "$file")"
-          done
-          find apps/desktop/src-tauri/target -path '*/release/bundle/dmg/*.dmg' -type f -print0 | while IFS= read -r -d '' file; do
-            cp "$file" "release-assets/ClaudeDesktopPlusPlus-${{ matrix.name }}-$(basename "$file")"
-          done
-          find apps/desktop/src-tauri/target -path '*/release/bundle/macos/*.app' -type d -print0 | while IFS= read -r -d '' app; do
-            app_name="$(basename "$app")"
-            tar -czf "release-assets/ClaudeDesktopPlusPlus-${{ matrix.name }}-${app_name}.tar.gz" -C "$(dirname "$app")" "$app_name"
-          done
+          case "${{ matrix.name }}" in
+            windows-x64)
+              source_asset="$(find apps/desktop/src-tauri/target -path '*/release/bundle/nsis/*.exe' -type f -print -quit)"
+              asset_name="ClaudePlus-Windows-x64-Setup.exe"
+              ;;
+            macos-arm64)
+              source_asset="$(find apps/desktop/src-tauri/target -path '*/release/bundle/dmg/*.dmg' -type f -print -quit)"
+              asset_name="ClaudePlus-macOS-arm64.dmg"
+              ;;
+            macos-x64)
+              source_asset="$(find apps/desktop/src-tauri/target -path '*/release/bundle/dmg/*.dmg' -type f -print -quit)"
+              asset_name="ClaudePlus-macOS-x64.dmg"
+              ;;
+            *)
+              echo "Unsupported release target: ${{ matrix.name }}"
+              exit 1
+              ;;
+          esac
+          if [ -z "$source_asset" ]; then
+            echo "No installer found for ${{ matrix.name }}"
+            exit 1
+          fi
+          cp "$source_asset" "release-assets/$asset_name"
           if [ -z "$(ls -A release-assets)" ]; then
             echo "No release artifacts found"
             find apps/desktop/src-tauri/target -maxdepth 6 -type f | sort | tail -200
@@ -159,3 +172,11 @@ jobs:
         with:
           files: release-assets/*
           generate_release_notes: true
+          body: |
+            ## 安装包下载说明
+
+            - **Windows 10/11 x64**：下载 `ClaudePlus-Windows-x64-Setup.exe`
+            - **Apple Silicon（M1/M2/M3/M4/M5）**：下载 `ClaudePlus-macOS-arm64.dmg`
+            - **Intel Mac**：下载 `ClaudePlus-macOS-x64.dmg`
+
+            macOS 首次启动可能需要在“系统设置 > 隐私与安全性”中确认打开。本页只提供以上三个安装包，源码压缩包由 GitHub 自动生成，不是安装程序。

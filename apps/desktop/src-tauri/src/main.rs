@@ -52,6 +52,8 @@ const OFFICIAL_PLUGIN_MARKETPLACE_NAME: &str = "claude-plugins-official";
 const OFFICIAL_PLUGIN_MARKETPLACE_REPO: &str = "anthropics/claude-plugins-official";
 const CLAUDE_DESKTOP_MSIX_REDIRECT_URL: &str =
     "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect";
+const CLAUDE_DESKTOP_MACOS_PKG_REDIRECT_URL: &str =
+    "https://claude.ai/api/desktop/darwin/universal/pkg/latest/redirect";
 const CLAUDE_PLUS_GITHUB_RELEASE_API: &str =
     "https://api.github.com/repos/2270525352/ClaudeDesktopPlusPlus/releases/latest";
 const CLAUDE_PLUS_GITHUB_RELEASES_URL: &str =
@@ -900,7 +902,7 @@ async fn update_status() -> Result<UpdateStatus, String> {
 
 #[tauri::command]
 async fn upgrade_claude_desktop() -> Result<SystemActionResult, String> {
-    tauri::async_runtime::spawn_blocking(|| install_claude_modern_sync_inner(true))
+    tauri::async_runtime::spawn_blocking(upgrade_claude_desktop_sync)
         .await
         .map_err(|error| error.to_string())?
 }
@@ -1077,9 +1079,13 @@ fn install_claude_modern_sync() -> Result<SystemActionResult, String> {
 }
 
 fn install_claude_modern_sync_inner(force_upgrade: bool) -> Result<SystemActionResult, String> {
+    if cfg!(target_os = "macos") {
+        return install_claude_macos_package_sync(force_upgrade);
+    }
     if !cfg!(target_os = "windows") {
         return Err(
-            "Claude modern installer automation is only implemented on Windows".to_string(),
+            "Claude Desktop installer automation is only implemented on Windows and macOS"
+                .to_string(),
         );
     }
 
@@ -1149,6 +1155,72 @@ Write-Output "Installed Claude modern package from $location"
     })
 }
 
+fn upgrade_claude_desktop_sync() -> Result<SystemActionResult, String> {
+    let check = check_claude_desktop_update();
+    if check.current_version.is_some()
+        && check.latest_version.is_some()
+        && !check.update_available
+    {
+        return Ok(SystemActionResult {
+            ok: true,
+            exit_code: Some(0),
+            message: "Claude Desktop is already up to date.".to_string(),
+            stdout: check.message,
+            stderr: String::new(),
+            reboot_required: reboot_required_by_windows(),
+            downloaded_path: None,
+            system: system_readiness(),
+        });
+    }
+    install_claude_modern_sync_inner(true)
+}
+
+fn install_claude_macos_package_sync(
+    force_upgrade: bool,
+) -> Result<SystemActionResult, String> {
+    if !cfg!(target_os = "macos") {
+        return Err("Claude Desktop PKG installation is only supported on macOS".to_string());
+    }
+    if !force_upgrade && detect_claude_install().is_some() {
+        return Ok(SystemActionResult {
+            ok: true,
+            exit_code: Some(0),
+            message: "Claude Desktop is already installed.".to_string(),
+            stdout: String::new(),
+            stderr: String::new(),
+            reboot_required: false,
+            downloaded_path: None,
+            system: system_readiness(),
+        });
+    }
+
+    let (download_url, latest_version) = resolve_claude_desktop_latest_download()?;
+    let version_label = latest_version.as_deref().unwrap_or("latest");
+    let package_path = downloads_dir()?.join(format!(
+        "Claude-Desktop-{}.pkg",
+        sanitize_download_filename(version_label)
+    ));
+    download_url_to_file(&download_url, &package_path)?;
+    open_downloaded_installer(&package_path)?;
+
+    Ok(SystemActionResult {
+        ok: true,
+        exit_code: None,
+        message: if force_upgrade {
+            "Claude Desktop update package was downloaded and opened. Complete the macOS installer to upgrade."
+                .to_string()
+        } else {
+            "Claude Desktop package was downloaded and opened. Complete the macOS installer to install."
+                .to_string()
+        },
+        stdout: format!("Downloaded {download_url}"),
+        stderr: String::new(),
+        reboot_required: false,
+        downloaded_path: Some(path_string(&package_path)),
+        system: system_readiness(),
+    })
+}
+
 fn update_status_sync() -> Result<UpdateStatus, String> {
     Ok(UpdateStatus {
         claude_desktop: check_claude_desktop_update(),
@@ -1165,19 +1237,30 @@ fn check_claude_desktop_update() -> VersionCheck {
                 .as_deref()
                 .zip(latest_version.as_deref())
                 .is_some_and(|(current, latest)| is_version_newer(latest, current));
+            let message = match (
+                current_version.as_deref(),
+                latest_version.as_deref(),
+                update_available,
+            ) {
+                (None, Some(latest), _) => {
+                    format!("Claude Desktop is not installed or its version could not be read. Latest available version: {latest}.")
+                }
+                (Some(current), Some(latest), true) => {
+                    format!("Claude Desktop {current} can be updated to {latest}.")
+                }
+                (Some(current), Some(latest), false) => {
+                    format!("Claude Desktop {current} is up to date (latest: {latest}).")
+                }
+                _ => "Claude Desktop latest version could not be compared.".to_string(),
+            };
             VersionCheck {
                 current_version,
                 latest_version,
                 update_available,
                 download_url: Some(download_url),
                 release_url: Some("https://claude.ai/download".to_string()),
-                asset_name: Some("Claude-modern.msix".to_string()),
-                message: if update_available {
-                    "Claude Desktop update is available.".to_string()
-                } else {
-                    "Claude Desktop is up to date or latest version could not be compared."
-                        .to_string()
-                },
+                asset_name: Some(claude_desktop_latest_asset_name().to_string()),
+                message,
             }
         }
         Err(error) => VersionCheck {
@@ -1229,11 +1312,16 @@ fn check_claude_plus_update() -> VersionCheck {
 }
 
 fn resolve_claude_desktop_latest_download() -> Result<(String, Option<String>), String> {
+    let redirect_url = claude_desktop_latest_redirect_url()?;
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(20))
         .redirects(0)
         .build();
-    let location = match agent.get(CLAUDE_DESKTOP_MSIX_REDIRECT_URL).call() {
+    let location = match agent
+        .get(redirect_url)
+        .set("User-Agent", "ClaudeDesktopPlusPlus")
+        .call()
+    {
         Ok(response) => response.get_url().to_string(),
         Err(ureq::Error::Status(status, response)) if (300..400).contains(&status) => response
             .header("location")
@@ -1243,6 +1331,24 @@ fn resolve_claude_desktop_latest_download() -> Result<(String, Option<String>), 
     };
     let version = claude_version_from_download_url(&location);
     Ok((location, version))
+}
+
+fn claude_desktop_latest_redirect_url() -> Result<&'static str, String> {
+    if cfg!(target_os = "windows") {
+        return Ok(CLAUDE_DESKTOP_MSIX_REDIRECT_URL);
+    }
+    if cfg!(target_os = "macos") {
+        return Ok(CLAUDE_DESKTOP_MACOS_PKG_REDIRECT_URL);
+    }
+    Err("Claude Desktop update checks are only supported on Windows and macOS".to_string())
+}
+
+fn claude_desktop_latest_asset_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Claude-Desktop-latest.pkg"
+    } else {
+        "Claude-Desktop-latest.msix"
+    }
 }
 
 fn latest_claude_plus_release() -> Result<(GitHubRelease, Option<GitHubReleaseAsset>), String> {
@@ -4219,19 +4325,19 @@ fn system_readiness() -> SystemReadiness {
                     .flatten()
             }),
         claude_installed: install.is_some(),
-        claude_modern_installer: install
-            .as_ref()
-            .is_some_and(|install| install.app_user_model_id.is_some())
-            || windows_appx_package.is_some(),
+        claude_modern_installer: if cfg!(target_os = "windows") {
+            install
+                .as_ref()
+                .is_some_and(|install| install.app_user_model_id.is_some())
+                || windows_appx_package.is_some()
+        } else {
+            install.is_some()
+        },
         claude_appx_package: windows_appx_package,
         claude_version: windows
             .as_ref()
             .and_then(|snapshot| snapshot.claude_version.clone())
-            .or_else(|| {
-                (!cfg!(target_os = "windows"))
-                    .then(claude_desktop_current_version)
-                    .flatten()
-            }),
+            .or_else(claude_desktop_current_version),
         virtual_machine_platform: windows
             .as_ref()
             .and_then(|snapshot| snapshot.virtual_machine_platform.clone())
@@ -4428,10 +4534,76 @@ fn claude_appx_package_name() -> Option<String> {
 }
 
 fn claude_desktop_current_version() -> Option<String> {
-    if cfg!(target_os = "windows") {
+    #[cfg(target_os = "windows")]
+    {
         return powershell_trimmed(
             "Get-AppxPackage Claude | Select-Object -First 1 -ExpandProperty Version",
-        );
+        )
+        .or_else(|| {
+            detect_claude_install()
+                .as_ref()
+                .and_then(|install| claude_version_from_install_path(&install.executable))
+        });
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return detect_claude_install()
+            .as_ref()
+            .and_then(|install| macos_bundle_from_executable(&install.executable))
+            .and_then(|bundle| read_macos_bundle_version(&bundle));
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        None
+    }
+}
+
+fn claude_version_from_install_path(path: &Path) -> Option<String> {
+    for ancestor in path.ancestors() {
+        let Some(name) = ancestor.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if let Some(version) = name.strip_prefix("app-").filter(|value| is_version_like(value)) {
+            return Some(version.to_string());
+        }
+        if let Some(rest) = name.strip_prefix("Claude_") {
+            if let Some(version) = rest.split('_').next().filter(|value| is_version_like(value)) {
+                return Some(version.to_string());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn macos_bundle_from_executable(executable: &Path) -> Option<PathBuf> {
+    executable
+        .ancestors()
+        .find(|path| {
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
+        })
+        .map(Path::to_path_buf)
+}
+
+#[cfg(target_os = "macos")]
+fn read_macos_bundle_version(bundle: &Path) -> Option<String> {
+    let info_plist = bundle.join("Contents").join("Info.plist");
+    for key in ["CFBundleShortVersionString", "CFBundleVersion"] {
+        let output = Command::new("/usr/bin/plutil")
+            .args(["-extract", key, "raw", "-o", "-"])
+            .arg(&info_plist)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()?;
+        if output.status.success() {
+            let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !value.is_empty() {
+                return Some(value);
+            }
+        }
     }
     None
 }
@@ -8021,6 +8193,33 @@ fn run_headless_command() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_version_helpers_cover_release_and_install_paths() {
+        assert_eq!(
+            claude_version_from_download_url(
+                "https://downloads.claude.ai/releases/darwin/universal/1.24012.9/Claude.pkg"
+            )
+            .as_deref(),
+            Some("1.24012.9")
+        );
+        assert_eq!(
+            claude_version_from_install_path(Path::new(
+                r"C:\Users\tester\AppData\Local\AnthropicClaude\app-1.24012.9\claude.exe"
+            ))
+            .as_deref(),
+            Some("1.24012.9")
+        );
+        assert_eq!(
+            claude_version_from_install_path(Path::new(
+                r"C:\Program Files\WindowsApps\Claude_1.15962.1.0_x64__pzs8sxrjxfjjc\app\Claude.exe"
+            ))
+            .as_deref(),
+            Some("1.15962.1.0")
+        );
+        assert!(is_version_newer("1.24012.10", "1.24012.9"));
+        assert!(!is_version_newer("1.24012.9", "1.24012.9"));
+    }
 
     #[test]
     fn legacy_builtin_skills_marker_defaults_to_no_backups() {
