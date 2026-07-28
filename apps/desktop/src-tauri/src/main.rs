@@ -52,8 +52,6 @@ const OFFICIAL_PLUGIN_MARKETPLACE_NAME: &str = "claude-plugins-official";
 const OFFICIAL_PLUGIN_MARKETPLACE_REPO: &str = "anthropics/claude-plugins-official";
 const CLAUDE_DESKTOP_MSIX_REDIRECT_URL: &str =
     "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect";
-const CLAUDE_DESKTOP_MACOS_PKG_REDIRECT_URL: &str =
-    "https://claude.ai/api/desktop/darwin/universal/pkg/latest/redirect";
 const CLAUDE_DESKTOP_MACOS_DMG_REDIRECT_URL: &str =
     "https://claude.ai/api/desktop/darwin/universal/dmg/latest/redirect";
 const CLAUDE_DESKTOP_DOWNLOAD_USER_AGENT: &str =
@@ -375,9 +373,11 @@ struct CapabilityConfigPath {
 #[derive(Debug, Serialize)]
 struct SystemReadiness {
     is_windows: bool,
+    is_macos: bool,
     is_admin: bool,
     os_name: Option<String>,
     os_build: Option<String>,
+    os_arch: String,
     virtualization_firmware_enabled: Option<bool>,
     hypervisor_present: Option<bool>,
     hypervisor_launch_type: Option<String>,
@@ -385,6 +385,9 @@ struct SystemReadiness {
     claude_modern_installer: bool,
     claude_appx_package: Option<String>,
     claude_version: Option<String>,
+    claude_install_path: Option<String>,
+    claude_signature_valid: Option<bool>,
+    claude_gatekeeper_accepted: Option<bool>,
     virtual_machine_platform: Option<String>,
     hypervisor_platform: Option<String>,
     hyper_v: Option<String>,
@@ -1462,21 +1465,26 @@ fn install_claude_macos_package_sync(
         .and_then(|value| value.to_str())
         .unwrap_or("installer")
         .to_ascii_uppercase();
+    let completion_hint = if installer_kind == "DMG" {
+        "Drag Claude.app into Applications, replacing the existing copy when repairing or upgrading."
+    } else {
+        "Complete the macOS installer."
+    };
 
     Ok(SystemActionResult {
         ok: true,
         exit_code: None,
         message: if repair_reason.is_some() {
             format!(
-                "Claude Desktop failed the macOS integrity check. A fresh official {installer_kind} has been downloaded and opened for repair."
+                "Claude Desktop failed the macOS integrity check. A fresh official {installer_kind} has been downloaded and opened for repair. {completion_hint}"
             )
         } else if force_upgrade {
             format!(
-                "Claude Desktop {installer_kind} was downloaded and opened. Complete the macOS installer to upgrade."
+                "Claude Desktop {installer_kind} was downloaded and opened. {completion_hint}"
             )
         } else {
             format!(
-                "Claude Desktop {installer_kind} was downloaded and opened. Complete the macOS installer to install."
+                "Claude Desktop {installer_kind} was downloaded and opened. {completion_hint}"
             )
         },
         stdout: [repair_reason, Some(format!("Downloaded {download_url}"))]
@@ -1572,28 +1580,6 @@ fn verify_macos_downloaded_installer(path: &Path) -> Result<(), String> {
             .map(str::to_ascii_lowercase)
             .as_deref()
         {
-            Some("pkg") => {
-                let output = Command::new("/usr/sbin/pkgutil")
-                    .args(["--check-signature"])
-                    .arg(path)
-                    .stdin(Stdio::null())
-                    .output()
-                    .map_err(|error| error.to_string())?;
-                if !output.status.success() {
-                    return Err(format_command_failure(&output));
-                }
-                let details = format!(
-                    "{}\n{}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                if !details.contains(ANTHROPIC_MACOS_TEAM_ID) {
-                    return Err(format!(
-                        "PKG has an unexpected signing identity; expected Anthropic team {ANTHROPIC_MACOS_TEAM_ID}"
-                    ));
-                }
-                Ok(())
-            }
             Some("dmg") => {
                 let output = Command::new("/usr/bin/hdiutil")
                     .args(["verify"])
@@ -1778,10 +1764,7 @@ fn resolve_claude_desktop_download_redirect(
 fn claude_desktop_redirect_urls_for_platform(platform: &str) -> Vec<&'static str> {
     match platform {
         "win32" => vec![CLAUDE_DESKTOP_MSIX_REDIRECT_URL],
-        "darwin" => vec![
-            CLAUDE_DESKTOP_MACOS_PKG_REDIRECT_URL,
-            CLAUDE_DESKTOP_MACOS_DMG_REDIRECT_URL,
-        ],
+        "darwin" => vec![CLAUDE_DESKTOP_MACOS_DMG_REDIRECT_URL],
         _ => Vec::new(),
     }
 }
@@ -2989,6 +2972,29 @@ fn macos_signature_valid_for_status(install: &ClaudeInstall) -> Option<bool> {
         let _ = install;
         None
     }
+}
+
+fn macos_gatekeeper_accepted_for_status(install: &ClaudeInstall) -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        let bundle = macos_app_bundle_for_install(install)?;
+        return Some(assess_macos_gatekeeper(&bundle).is_ok());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = install;
+        None
+    }
+}
+
+fn claude_install_display_path(install: &ClaudeInstall) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(bundle) = macos_app_bundle_for_install(install) {
+            return path_string(&bundle);
+        }
+    }
+    path_string(&install.executable)
 }
 
 #[cfg(target_os = "macos")]
@@ -5393,52 +5399,105 @@ fn read_json_file(path: &Path) -> anyhow::Result<Value> {
     Ok(serde_json::from_str(raw.trim_start_matches('\u{feff}'))?)
 }
 
+#[cfg(target_os = "macos")]
+fn macos_system_value(argument: &str) -> Option<String> {
+    let output = Command::new("/usr/bin/sw_vers")
+        .arg(argument)
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_os_name() -> Option<String> {
+    let product = macos_system_value("-productName").unwrap_or_else(|| "macOS".to_string());
+    let version = macos_system_value("-productVersion");
+    Some(
+        [Some(product), version]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn macos_os_name() -> Option<String> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn macos_os_build() -> Option<String> {
+    macos_system_value("-buildVersion")
+}
+
+#[cfg(not(target_os = "macos"))]
+fn macos_os_build() -> Option<String> {
+    None
+}
+
+fn current_arch_label() -> String {
+    match std::env::consts::ARCH {
+        "aarch64" => "Apple Silicon (arm64)".to_string(),
+        "x86_64" => {
+            if cfg!(target_os = "macos") {
+                "Intel (x64)".to_string()
+            } else {
+                "x64".to_string()
+            }
+        }
+        arch => arch.to_string(),
+    }
+}
+
 fn system_readiness() -> SystemReadiness {
     let install = detect_claude_install();
     let windows = windows_readiness_snapshot();
     let windows_appx_package = windows
         .as_ref()
         .and_then(|snapshot| snapshot.claude_appx_package.clone());
+    let claude_install_path = install.as_ref().map(claude_install_display_path);
+    let claude_signature_valid = install
+        .as_ref()
+        .and_then(macos_signature_valid_for_status);
+    let claude_gatekeeper_accepted = install
+        .as_ref()
+        .and_then(macos_gatekeeper_accepted_for_status);
     SystemReadiness {
         is_windows: cfg!(target_os = "windows"),
+        is_macos: cfg!(target_os = "macos"),
         is_admin: windows
             .as_ref()
             .and_then(|snapshot| snapshot.is_admin)
-            .unwrap_or_else(|| {
-                if cfg!(target_os = "windows") {
-                    false
-                } else {
-                    is_running_as_admin()
-                }
-            }),
+            .unwrap_or_else(is_running_as_admin),
         os_name: windows
             .as_ref()
             .and_then(|snapshot| snapshot.os_name.clone())
-            .or_else(|| (!cfg!(target_os = "windows")).then(windows_os_caption).flatten()),
+            .or_else(windows_os_caption)
+            .or_else(macos_os_name),
         os_build: windows
             .as_ref()
             .and_then(|snapshot| snapshot.os_build.clone())
-            .or_else(|| (!cfg!(target_os = "windows")).then(windows_os_build).flatten()),
+            .or_else(windows_os_build)
+            .or_else(macos_os_build),
+        os_arch: current_arch_label(),
         virtualization_firmware_enabled: windows
             .as_ref()
             .and_then(|snapshot| snapshot.virtualization_firmware_enabled)
-            .or_else(|| {
-                (!cfg!(target_os = "windows"))
-                    .then(virtualization_firmware_enabled)
-                    .flatten()
-            }),
+            .or_else(virtualization_firmware_enabled),
         hypervisor_present: windows
             .as_ref()
             .and_then(|snapshot| snapshot.hypervisor_present)
-            .or_else(|| (!cfg!(target_os = "windows")).then(hypervisor_present).flatten()),
+            .or_else(hypervisor_present),
         hypervisor_launch_type: windows
             .as_ref()
             .and_then(|snapshot| snapshot.hypervisor_launch_type.clone())
-            .or_else(|| {
-                (!cfg!(target_os = "windows"))
-                    .then(hypervisor_launch_type)
-                    .flatten()
-            }),
+            .or_else(hypervisor_launch_type),
         claude_installed: install.is_some(),
         claude_modern_installer: if cfg!(target_os = "windows") {
             install
@@ -5453,56 +5512,53 @@ fn system_readiness() -> SystemReadiness {
             .as_ref()
             .and_then(|snapshot| snapshot.claude_version.clone())
             .or_else(claude_desktop_current_version),
+        claude_install_path,
+        claude_signature_valid,
+        claude_gatekeeper_accepted,
         virtual_machine_platform: windows
             .as_ref()
-            .and_then(|snapshot| snapshot.virtual_machine_platform.clone())
-            .or_else(|| {
-                (!cfg!(target_os = "windows"))
-                    .then(|| windows_feature_state("VirtualMachinePlatform"))
-                    .flatten()
-            }),
+            .and_then(|snapshot| snapshot.virtual_machine_platform.clone()),
         hypervisor_platform: windows
             .as_ref()
-            .and_then(|snapshot| snapshot.hypervisor_platform.clone())
-            .or_else(|| {
-                (!cfg!(target_os = "windows"))
-                    .then(|| windows_feature_state("HypervisorPlatform"))
-                    .flatten()
-            }),
+            .and_then(|snapshot| snapshot.hypervisor_platform.clone()),
         hyper_v: windows
             .as_ref()
-            .and_then(|snapshot| snapshot.hyper_v.clone())
-            .or_else(|| {
-                (!cfg!(target_os = "windows"))
-                    .then(|| windows_feature_state("Microsoft-Hyper-V-All"))
-                    .flatten()
-            }),
+            .and_then(|snapshot| snapshot.hyper_v.clone()),
         reboot_required: windows
             .as_ref()
             .and_then(|snapshot| snapshot.reboot_required)
-            .unwrap_or_else(|| {
-                if cfg!(target_os = "windows") {
-                    false
-                } else {
-                    reboot_required_by_windows()
-                }
-            }),
+            .unwrap_or_else(reboot_required_by_windows),
     }
 }
 
 fn system_readiness_placeholder(install: Option<&ClaudeInstall>) -> SystemReadiness {
     SystemReadiness {
         is_windows: cfg!(target_os = "windows"),
+        is_macos: cfg!(target_os = "macos"),
         is_admin: false,
-        os_name: None,
+        os_name: if cfg!(target_os = "macos") {
+            Some("macOS".to_string())
+        } else if cfg!(target_os = "windows") {
+            Some("Windows".to_string())
+        } else {
+            None
+        },
         os_build: None,
+        os_arch: current_arch_label(),
         virtualization_firmware_enabled: None,
         hypervisor_present: None,
         hypervisor_launch_type: None,
         claude_installed: install.is_some(),
-        claude_modern_installer: install.is_some_and(|install| install.app_user_model_id.is_some()),
+        claude_modern_installer: if cfg!(target_os = "windows") {
+            install.is_some_and(|install| install.app_user_model_id.is_some())
+        } else {
+            install.is_some()
+        },
         claude_appx_package: None,
         claude_version: None,
+        claude_install_path: install.map(claude_install_display_path),
+        claude_signature_valid: None,
+        claude_gatekeeper_accepted: None,
         virtual_machine_platform: None,
         hypervisor_platform: None,
         hyper_v: None,
@@ -5708,19 +5764,6 @@ fn hide_child_console(command: &mut Command) {
     {
         command.creation_flags(CREATE_NO_WINDOW);
     }
-}
-
-fn windows_feature_state(feature_name: &str) -> Option<String> {
-    if !cfg!(target_os = "windows") {
-        return None;
-    }
-    let feature_name = feature_name.replace('\'', "''");
-    let script = format!(
-        "(Get-WindowsOptionalFeature -Online -FeatureName '{feature_name}').State.ToString()"
-    );
-    let output = run_powershell_script(&script).ok()?;
-    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!value.is_empty()).then_some(value)
 }
 
 fn claude_appx_package_name() -> Option<String> {
@@ -9700,19 +9743,10 @@ mod tests {
     }
 
     #[test]
-    fn macos_claude_download_has_pkg_and_dmg_fallbacks() {
+    fn macos_claude_download_uses_the_consumer_dmg() {
         assert_eq!(
             claude_desktop_redirect_urls_for_platform("darwin"),
-            vec![
-                CLAUDE_DESKTOP_MACOS_PKG_REDIRECT_URL,
-                CLAUDE_DESKTOP_MACOS_DMG_REDIRECT_URL,
-            ]
-        );
-        assert_eq!(
-            claude_desktop_installer_extension(
-                "https://downloads.claude.ai/releases/darwin/universal/1.2.3/Claude.pkg"
-            ),
-            "pkg"
+            vec![CLAUDE_DESKTOP_MACOS_DMG_REDIRECT_URL]
         );
         assert_eq!(
             claude_desktop_installer_extension(

@@ -436,6 +436,10 @@ a.text-button {
   display: none;
 }
 
+[data-system-platform][hidden] {
+  display: none !important;
+}
+
 .nested-modal {
   z-index: 40;
 }

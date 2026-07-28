@@ -82,7 +82,8 @@
       updateProgressFailed: "升级失败",
       updateProgressBytes: "{downloaded} / {total}",
       updateProgressBytesUnknown: "已下载 {downloaded}",
-      windowsStatus: "Windows 版本",
+      systemOsVersion: "系统版本",
+      systemArchitecture: "系统架构",
       adminStatus: "管理员权限",
       firmwareVirtualization: "固件虚拟化",
       hypervisorLaunchType: "Hypervisor 启动项",
@@ -92,12 +93,17 @@
       vmpStatus: "Virtual Machine Platform",
       hypervisorStatus: "Hypervisor Platform",
       rebootStatus: "重启需求",
+      claudeInstallLocation: "Claude 安装位置",
+      claudeSignatureStatus: "应用签名",
+      gatekeeperStatus: "Gatekeeper",
       relaunchAsAdmin: "以管理员重新打开",
       selectClaudeExecutable: "手动选择 Claude 地址",
       selectClaudeExecutableOk: "已保存 Claude 地址：{path}",
       installClaudeModern: "一键安装 Claude Desktop",
+      installClaudeMac: "安装或修复 Claude Desktop",
       enableVmp: "一键启用 VMP",
-      systemReadyHint: "Cowork 需要 modern installer、VMP 和一次系统重启。",
+      systemReadyHintWindows: "Cowork 在 Windows 上需要 modern installer 和 Virtual Machine Platform；启用后通常需要重启。",
+      systemReadyHintMac: "macOS 使用官方 DMG 安装 Claude Desktop；应用签名和 Gatekeeper 检查通过后即可启动。",
       doctorTitle: "Claude 体检报告",
       doctorSubtitle: "检查安装、系统、API、插件、汉化和历史状态。",
       doctorPrimaryAction: "一键修复并启动",
@@ -126,7 +132,10 @@
       doctorSystemNeedsModern: "需要 modern installer 才能完整使用 Cowork",
       doctorSystemNeedsVmp: "Virtual Machine Platform 未启用",
       doctorSystemNeedsRestart: "系统功能已暂存，需要重启",
+      doctorSystemSignatureInvalid: "Claude.app 签名异常，需要修复安装",
+      doctorSystemGatekeeperRejected: "Claude.app 被 Gatekeeper 拒绝",
       doctorSystemMeta: "VMP: {vmp} / Hypervisor: {hypervisor}",
+      doctorSystemMetaMac: "{os} / {arch}",
       doctorApiReady: "当前 API 可用于启动",
       doctorApiMissing: "还没有当前 API 配置",
       doctorApiNeedsConfig: "当前 API 缺少可用 Base URL 或 Key",
@@ -213,6 +222,10 @@
       boolYes: "是",
       boolNo: "否",
       unknown: "未知",
+      signatureValid: "Anthropic 签名有效",
+      signatureInvalid: "签名无效",
+      gatekeeperAccepted: "已通过",
+      gatekeeperRejected: "已拒绝",
       modernInstallOk: "已安装 MSIX / modern installer",
       modernInstallMissing: "未检测到 modern installer",
       featureEnabled: "已启用",
@@ -607,7 +620,8 @@
       updateProgressFailed: "Update failed",
       updateProgressBytes: "{downloaded} / {total}",
       updateProgressBytesUnknown: "Downloaded {downloaded}",
-      windowsStatus: "Windows Version",
+      systemOsVersion: "System Version",
+      systemArchitecture: "Architecture",
       adminStatus: "Administrator",
       firmwareVirtualization: "Firmware Virtualization",
       hypervisorLaunchType: "Hypervisor Launch",
@@ -617,12 +631,17 @@
       vmpStatus: "Virtual Machine Platform",
       hypervisorStatus: "Hypervisor Platform",
       rebootStatus: "Reboot",
+      claudeInstallLocation: "Claude Install Location",
+      claudeSignatureStatus: "App Signature",
+      gatekeeperStatus: "Gatekeeper",
       relaunchAsAdmin: "Relaunch as Admin",
       selectClaudeExecutable: "Select Claude Location",
       selectClaudeExecutableOk: "Claude location saved: {path}",
       installClaudeModern: "Install Claude Desktop",
+      installClaudeMac: "Install or Repair Claude Desktop",
       enableVmp: "Enable VMP",
-      systemReadyHint: "Cowork needs the modern installer, VMP, and one Windows restart.",
+      systemReadyHintWindows: "Cowork on Windows needs the modern installer and Virtual Machine Platform; a restart is usually required after enablement.",
+      systemReadyHintMac: "macOS installs Claude Desktop from the official DMG. Claude can launch after its signature and Gatekeeper checks pass.",
       doctorTitle: "Claude Health Report",
       doctorSubtitle: "Checks installation, system, API, plugins, localization, and history.",
       doctorPrimaryAction: "Fix and Launch",
@@ -651,7 +670,10 @@
       doctorSystemNeedsModern: "Modern installer is required for full Cowork support",
       doctorSystemNeedsVmp: "Virtual Machine Platform is not enabled",
       doctorSystemNeedsRestart: "System features are staged; restart required",
+      doctorSystemSignatureInvalid: "Claude.app has an invalid signature and must be repaired",
+      doctorSystemGatekeeperRejected: "Claude.app was rejected by Gatekeeper",
       doctorSystemMeta: "VMP: {vmp} / Hypervisor: {hypervisor}",
+      doctorSystemMetaMac: "{os} / {arch}",
       doctorApiReady: "The active API can be used for launch",
       doctorApiMissing: "No active API provider is configured",
       doctorApiNeedsConfig: "The active API lacks a usable Base URL or key",
@@ -738,6 +760,10 @@
       boolYes: "Yes",
       boolNo: "No",
       unknown: "Unknown",
+      signatureValid: "Valid Anthropic signature",
+      signatureInvalid: "Invalid signature",
+      gatekeeperAccepted: "Accepted",
+      gatekeeperRejected: "Rejected",
       modernInstallOk: "MSIX / modern installer installed",
       modernInstallMissing: "Modern installer not detected",
       featureEnabled: "Enabled",
@@ -2133,21 +2159,32 @@
     if (systemLoaded) {
       const vmpReady = !system.is_windows || featureEnabled(system.virtual_machine_platform);
       const hypervisorReady = !system.is_windows || system.hypervisor_present !== false;
-      const systemIssue = !system.claude_modern_installer
-        ? t("doctorSystemNeedsModern")
-        : system.reboot_required
-          ? t("doctorSystemNeedsRestart")
-          : !vmpReady
-            ? t("doctorSystemNeedsVmp")
+      const systemIssue = system.is_windows
+        ? !system.claude_modern_installer
+          ? t("doctorSystemNeedsModern")
+          : system.reboot_required
+            ? t("doctorSystemNeedsRestart")
+            : !vmpReady
+              ? t("doctorSystemNeedsVmp")
+              : null
+        : system.is_macos && system.claude_signature_valid === false
+          ? t("doctorSystemSignatureInvalid")
+          : system.is_macos && system.claude_gatekeeper_accepted === false
+            ? t("doctorSystemGatekeeperRejected")
             : null;
       systemItem = {
         ...systemItem,
         level: systemIssue ? "warn" : "ok",
         summary: systemIssue || t("doctorSystemReady"),
-        meta: t("doctorSystemMeta", {
-          vmp: formatFeatureState(system.virtual_machine_platform),
-          hypervisor: hypervisorReady ? t("boolYes") : t("boolNo"),
-        }),
+        meta: system.is_macos
+          ? t("doctorSystemMetaMac", {
+              os: system.os_name || "macOS",
+              arch: system.os_arch || "-",
+            })
+          : t("doctorSystemMeta", {
+              vmp: formatFeatureState(system.virtual_machine_platform),
+              hypervisor: hypervisorReady ? t("boolYes") : t("boolNo"),
+            }),
       };
     }
 
@@ -2330,10 +2367,34 @@
   }
 
   function renderSystemReadiness() {
+    const system = state?.system || {};
+    const platform = system.is_windows ? "windows" : system.is_macos ? "macos" : "other";
+    document.querySelectorAll("[data-system-platform]").forEach((element) => {
+      element.hidden = element.getAttribute("data-system-platform") !== platform;
+    });
+    const systemHint = document.getElementById("systemReadyHint");
+    if (systemHint) {
+      systemHint.textContent = platform === "macos"
+        ? t("systemReadyHintMac")
+        : platform === "windows"
+          ? t("systemReadyHintWindows")
+          : "";
+      systemHint.hidden = platform === "other";
+    }
+    const installButton = document.querySelector('[data-action="installClaudeModern"]');
+    if (installButton) {
+      installButton.textContent = platform === "macos" ? t("installClaudeMac") : t("installClaudeModern");
+    }
+    const osStatus = [
+      system.os_name,
+      system.os_build ? `build ${system.os_build}` : "",
+    ].filter(Boolean).join(" / ");
+    setText("systemOsStatus", osStatus || (systemLoading ? t("loading") : "-"));
+    setText("systemArchitecture", system.os_arch || "-");
+
     if (!systemLoaded) {
       const value = systemLoading ? t("loading") : "-";
       [
-        "windowsStatus",
         "adminStatus",
         "firmwareVirtualization",
         "hypervisorLaunchType",
@@ -2343,30 +2404,47 @@
         "vmpStatus",
         "hypervisorStatus",
         "rebootStatus",
+        "claudeInstallLocation",
+        "claudeSignatureStatus",
+        "gatekeeperStatus",
       ].forEach((id) => {
-        document.getElementById(id).textContent = value;
+        setText(id, value);
       });
       renderDoctorReport();
       renderVersionUpdates();
       return;
     }
-    const system = state?.system || {};
-    const windows = [system.os_name, system.os_build ? `build ${system.os_build}` : ""].filter(Boolean).join(" / ");
-    document.getElementById("windowsStatus").textContent = windows || "-";
-    document.getElementById("adminStatus").textContent = system.is_admin ? t("adminOk") : t("adminMissing");
-    document.getElementById("firmwareVirtualization").textContent = formatBool(system.virtualization_firmware_enabled);
-    document.getElementById("hypervisorLaunchType").textContent = system.hypervisor_launch_type || "-";
-    document.getElementById("hypervisorRuntime").textContent = formatBool(system.hypervisor_present);
-    document.getElementById("modernInstallStatus").textContent = system.claude_modern_installer
+    setText("adminStatus", system.is_admin ? t("adminOk") : t("adminMissing"));
+    setText("firmwareVirtualization", formatBool(system.virtualization_firmware_enabled));
+    setText("hypervisorLaunchType", system.hypervisor_launch_type || "-");
+    setText("hypervisorRuntime", formatBool(system.hypervisor_present));
+    setText("modernInstallStatus", system.claude_modern_installer
       ? t("modernInstallOk")
-      : t("modernInstallMissing");
-    document.getElementById("appxPackage").textContent = system.claude_appx_package || "-";
-    document.getElementById("vmpStatus").textContent = formatFeatureState(system.virtual_machine_platform);
-    document.getElementById("hypervisorStatus").textContent = [
+      : t("modernInstallMissing"));
+    setText("appxPackage", system.claude_appx_package || "-");
+    setText("vmpStatus", formatFeatureState(system.virtual_machine_platform));
+    setText("hypervisorStatus", [
       formatFeatureState(system.hypervisor_platform),
       system.hyper_v ? `Hyper-V: ${formatFeatureState(system.hyper_v)}` : "",
-    ].filter(Boolean).join(" / ") || "-";
-    document.getElementById("rebootStatus").textContent = system.reboot_required ? t("rebootRequired") : t("rebootNotRequired");
+    ].filter(Boolean).join(" / ") || "-");
+    setText("rebootStatus", system.reboot_required ? t("rebootRequired") : t("rebootNotRequired"));
+    setText("claudeInstallLocation", system.claude_install_path || "-");
+    setText(
+      "claudeSignatureStatus",
+      system.claude_signature_valid === true
+        ? t("signatureValid")
+        : system.claude_signature_valid === false
+          ? t("signatureInvalid")
+          : t("updateUnknown"),
+    );
+    setText(
+      "gatekeeperStatus",
+      system.claude_gatekeeper_accepted === true
+        ? t("gatekeeperAccepted")
+        : system.claude_gatekeeper_accepted === false
+          ? t("gatekeeperRejected")
+          : t("updateUnknown"),
+    );
     renderDoctorReport();
     renderVersionUpdates();
   }

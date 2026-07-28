@@ -216,24 +216,28 @@
               </div>
             </section>
             <dl class="detail-list compact">
-              <div><dt data-i18n="windowsStatus">Windows 版本</dt><dd id="windowsStatus">-</dd></div>
-              <div><dt data-i18n="adminStatus">管理员权限</dt><dd id="adminStatus">-</dd></div>
-              <div><dt data-i18n="firmwareVirtualization">固件虚拟化</dt><dd id="firmwareVirtualization">-</dd></div>
-              <div><dt data-i18n="hypervisorLaunchType">Hypervisor 启动项</dt><dd id="hypervisorLaunchType">-</dd></div>
-              <div><dt data-i18n="hypervisorRuntime">Hypervisor 运行</dt><dd id="hypervisorRuntime">-</dd></div>
-              <div><dt data-i18n="modernInstallStatus">Modern Installer</dt><dd id="modernInstallStatus">-</dd></div>
-              <div><dt data-i18n="appxPackage">Appx 包</dt><dd id="appxPackage">-</dd></div>
-              <div><dt data-i18n="vmpStatus">Virtual Machine Platform</dt><dd id="vmpStatus">-</dd></div>
-              <div><dt data-i18n="hypervisorStatus">Hypervisor Platform</dt><dd id="hypervisorStatus">-</dd></div>
-              <div><dt data-i18n="rebootStatus">重启需求</dt><dd id="rebootStatus">-</dd></div>
+              <div><dt data-i18n="systemOsVersion">系统版本</dt><dd id="systemOsStatus">-</dd></div>
+              <div><dt data-i18n="systemArchitecture">系统架构</dt><dd id="systemArchitecture">-</dd></div>
+              <div data-system-platform="windows"><dt data-i18n="adminStatus">管理员权限</dt><dd id="adminStatus">-</dd></div>
+              <div data-system-platform="windows"><dt data-i18n="firmwareVirtualization">固件虚拟化</dt><dd id="firmwareVirtualization">-</dd></div>
+              <div data-system-platform="windows"><dt data-i18n="hypervisorLaunchType">Hypervisor 启动项</dt><dd id="hypervisorLaunchType">-</dd></div>
+              <div data-system-platform="windows"><dt data-i18n="hypervisorRuntime">Hypervisor 运行</dt><dd id="hypervisorRuntime">-</dd></div>
+              <div data-system-platform="windows"><dt data-i18n="modernInstallStatus">Modern Installer</dt><dd id="modernInstallStatus">-</dd></div>
+              <div data-system-platform="windows"><dt data-i18n="appxPackage">Appx 包</dt><dd id="appxPackage">-</dd></div>
+              <div data-system-platform="windows"><dt data-i18n="vmpStatus">Virtual Machine Platform</dt><dd id="vmpStatus">-</dd></div>
+              <div data-system-platform="windows"><dt data-i18n="hypervisorStatus">Hypervisor Platform</dt><dd id="hypervisorStatus">-</dd></div>
+              <div data-system-platform="windows"><dt data-i18n="rebootStatus">重启需求</dt><dd id="rebootStatus">-</dd></div>
+              <div data-system-platform="macos"><dt data-i18n="claudeInstallLocation">Claude 安装位置</dt><dd id="claudeInstallLocation">-</dd></div>
+              <div data-system-platform="macos"><dt data-i18n="claudeSignatureStatus">应用签名</dt><dd id="claudeSignatureStatus">-</dd></div>
+              <div data-system-platform="macos"><dt data-i18n="gatekeeperStatus">Gatekeeper</dt><dd id="gatekeeperStatus">-</dd></div>
             </dl>
             <div class="button-row system-actions">
-              <button class="text-button" type="button" data-action="relaunchAsAdmin" data-i18n="relaunchAsAdmin">以管理员重新打开</button>
+              <button class="text-button" type="button" data-system-platform="windows" data-action="relaunchAsAdmin" data-i18n="relaunchAsAdmin">以管理员重新打开</button>
               <button class="text-button" type="button" data-action="selectClaudeExecutable" data-i18n="selectClaudeExecutable">手动选择 Claude 地址</button>
               <button class="text-button primary" type="button" data-action="installClaudeModern" data-i18n="installClaudeModern">一键安装 Claude Desktop</button>
-              <button class="text-button" type="button" data-action="enableVmp" data-i18n="enableVmp">一键启用 VMP</button>
+              <button class="text-button" type="button" data-system-platform="windows" data-action="enableVmp" data-i18n="enableVmp">一键启用 VMP</button>
             </div>
-            <p class="warning-copy" data-i18n="systemReadyHint">
+            <p id="systemReadyHint" class="warning-copy">
               Cowork 在 Windows 上需要 Claude Desktop modern installer 和 Virtual Machine Platform。启用系统功能后通常需要重启。
             </p>
             <div id="systemActionLog" class="evidence-log"></div>
