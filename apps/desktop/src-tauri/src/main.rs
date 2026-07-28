@@ -54,6 +54,10 @@ const CLAUDE_DESKTOP_MSIX_REDIRECT_URL: &str =
     "https://claude.ai/api/desktop/win32/x64/msix/latest/redirect";
 const CLAUDE_DESKTOP_MACOS_PKG_REDIRECT_URL: &str =
     "https://claude.ai/api/desktop/darwin/universal/pkg/latest/redirect";
+const CLAUDE_DESKTOP_MACOS_DMG_REDIRECT_URL: &str =
+    "https://claude.ai/api/desktop/darwin/universal/dmg/latest/redirect";
+const CLAUDE_DESKTOP_DOWNLOAD_USER_AGENT: &str =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15";
 const CLAUDE_PLUS_GITHUB_RELEASE_API: &str =
     "https://api.github.com/repos/2270525352/ClaudeDesktopPlusPlus/releases/latest";
 const CLAUDE_PLUS_GITHUB_RELEASES_URL: &str =
@@ -1269,7 +1273,7 @@ fn install_claude_modern_sync_inner(
         "Claude-Desktop-{}.msix",
         sanitize_download_filename(version_label)
     ));
-    download_url_to_file_with_progress(
+    download_claude_desktop_url_to_file_with_progress(
         &download_url,
         &package_path,
         |downloaded, total, download_percent| {
@@ -1403,28 +1407,23 @@ fn install_claude_macos_package_sync(
         None,
         "Resolving the official Claude Desktop package",
     );
-    let (download_url, latest_version) = resolve_claude_desktop_latest_download()?;
-    let version_label = latest_version.as_deref().unwrap_or("latest");
-    let package_path = downloads_dir()?.join(format!(
-        "Claude-Desktop-{}.pkg",
-        sanitize_download_filename(version_label)
-    ));
-    download_url_to_file_with_progress(
-        &download_url,
-        &package_path,
-        |downloaded, total, download_percent| {
-            let overall = 10 + download_percent.unwrap_or(0).saturating_mul(75) / 100;
-            emit_update_progress(
-                app,
-                "claude_desktop",
-                "downloading",
-                overall,
-                downloaded,
-                total,
-                "Downloading Claude Desktop",
-            );
-        },
-    )?;
+    let (download_url, package_path) = match download_claude_macos_installer(app) {
+        Ok(download) => download,
+        Err(error) => {
+            let _ = open_external_url("https://claude.ai/download".to_string());
+            return Ok(SystemActionResult {
+                ok: false,
+                exit_code: None,
+                message: "Automatic Claude Desktop download was rejected. The official download page has been opened."
+                    .to_string(),
+                stdout: String::new(),
+                stderr: error,
+                reboot_required: false,
+                downloaded_path: None,
+                system: system_readiness(),
+            });
+        }
+    };
     emit_update_progress(
         app,
         "claude_desktop",
@@ -1435,16 +1434,23 @@ fn install_claude_macos_package_sync(
         "Opening the macOS installer",
     );
     open_downloaded_installer(&package_path)?;
+    let installer_kind = package_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("installer")
+        .to_ascii_uppercase();
 
     Ok(SystemActionResult {
         ok: true,
         exit_code: None,
         message: if force_upgrade {
-            "Claude Desktop update package was downloaded and opened. Complete the macOS installer to upgrade."
-                .to_string()
+            format!(
+                "Claude Desktop {installer_kind} was downloaded and opened. Complete the macOS installer to upgrade."
+            )
         } else {
-            "Claude Desktop package was downloaded and opened. Complete the macOS installer to install."
-                .to_string()
+            format!(
+                "Claude Desktop {installer_kind} was downloaded and opened. Complete the macOS installer to install."
+            )
         },
         stdout: format!("Downloaded {download_url}"),
         stderr: String::new(),
@@ -1452,6 +1458,53 @@ fn install_claude_macos_package_sync(
         downloaded_path: Some(path_string(&package_path)),
         system: system_readiness(),
     })
+}
+
+fn download_claude_macos_installer(
+    app: Option<&tauri::AppHandle>,
+) -> Result<(String, PathBuf), String> {
+    let mut failures = Vec::new();
+    for redirect_url in claude_desktop_redirect_urls_for_platform("darwin") {
+        let (download_url, latest_version) =
+            match resolve_claude_desktop_download_redirect(redirect_url) {
+                Ok(download) => download,
+                Err(error) => {
+                    failures.push(format!("{redirect_url}: {error}"));
+                    continue;
+                }
+            };
+        let version_label = latest_version.as_deref().unwrap_or("latest");
+        let extension = claude_desktop_installer_extension(&download_url);
+        let package_path = downloads_dir()?.join(format!(
+            "Claude-Desktop-{}.{}",
+            sanitize_download_filename(version_label),
+            extension
+        ));
+        let download_result = download_claude_desktop_url_to_file_with_progress(
+            &download_url,
+            &package_path,
+            |downloaded, total, download_percent| {
+                let overall = 10 + download_percent.unwrap_or(0).saturating_mul(75) / 100;
+                emit_update_progress(
+                    app,
+                    "claude_desktop",
+                    "downloading",
+                    overall,
+                    downloaded,
+                    total,
+                    &format!("Downloading Claude Desktop {}", extension.to_ascii_uppercase()),
+                );
+            },
+        );
+        match download_result {
+            Ok(()) => return Ok((download_url, package_path)),
+            Err(error) => failures.push(format!("{download_url}: {error}")),
+        }
+    }
+    Err(format!(
+        "Unable to download the official Claude Desktop installer. {}",
+        failures.join(" | ")
+    ))
 }
 
 fn update_status_sync() -> Result<UpdateStatus, String> {
@@ -1491,9 +1544,9 @@ fn check_claude_desktop_update() -> VersionCheck {
                 latest_version,
                 update_available,
                 check_failed: false,
+                asset_name: Some(claude_desktop_asset_name_from_url(&download_url)),
                 download_url: Some(download_url),
                 release_url: Some("https://claude.ai/download".to_string()),
-                asset_name: Some(claude_desktop_latest_asset_name().to_string()),
                 message,
             }
         }
@@ -1549,16 +1602,41 @@ fn check_claude_plus_update() -> VersionCheck {
 }
 
 fn resolve_claude_desktop_latest_download() -> Result<(String, Option<String>), String> {
-    let redirect_url = claude_desktop_latest_redirect_url()?;
+    let platform = current_platform();
+    let redirect_urls = claude_desktop_redirect_urls_for_platform(platform);
+    if redirect_urls.is_empty() {
+        return Err(
+            "Claude Desktop update checks are only supported on Windows and macOS".to_string(),
+        );
+    }
+    let mut failures = Vec::new();
+    for redirect_url in redirect_urls {
+        match resolve_claude_desktop_download_redirect(redirect_url) {
+            Ok(download) => return Ok(download),
+            Err(error) => failures.push(format!("{redirect_url}: {error}")),
+        }
+    }
+    Err(format!(
+        "Unable to resolve the official Claude Desktop download. {}",
+        failures.join(" | ")
+    ))
+}
+
+fn resolve_claude_desktop_download_redirect(
+    redirect_url: &str,
+) -> Result<(String, Option<String>), String> {
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(20))
         .redirects(0)
         .build();
-    let location = match agent
+    let request_result = agent
         .get(redirect_url)
-        .set("User-Agent", "ClaudeDesktopPlusPlus")
-        .call()
-    {
+        .set("User-Agent", CLAUDE_DESKTOP_DOWNLOAD_USER_AGENT)
+        .set("Accept", "application/octet-stream,text/html;q=0.9,*/*;q=0.8")
+        .set("Referer", "https://claude.ai/download")
+        .set("Cache-Control", "no-cache")
+        .call();
+    let location_result = match request_result {
         Ok(response) if (300..400).contains(&response.status()) => response
             .header("location")
             .map(ToString::to_string)
@@ -1573,28 +1651,94 @@ fn resolve_claude_desktop_latest_download() -> Result<(String, Option<String>), 
             .header("location")
             .map(ToString::to_string)
             .ok_or_else(|| format!("redirect returned HTTP {status} without Location header"))?,
-        Err(error) => return Err(error.to_string()),
+        Err(error) => {
+            #[cfg(target_os = "macos")]
+            {
+                resolve_claude_desktop_redirect_with_curl(redirect_url)
+                    .map_err(|curl_error| format!("{error}; curl fallback: {curl_error}"))?
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                return Err(error.to_string());
+            }
+        }
     };
-    let version = claude_version_from_download_url(&location);
-    Ok((location, version))
+    let version = claude_version_from_download_url(&location_result);
+    Ok((location_result, version))
 }
 
-fn claude_desktop_latest_redirect_url() -> Result<&'static str, String> {
-    if cfg!(target_os = "windows") {
-        return Ok(CLAUDE_DESKTOP_MSIX_REDIRECT_URL);
+fn claude_desktop_redirect_urls_for_platform(platform: &str) -> Vec<&'static str> {
+    match platform {
+        "win32" => vec![CLAUDE_DESKTOP_MSIX_REDIRECT_URL],
+        "darwin" => vec![
+            CLAUDE_DESKTOP_MACOS_PKG_REDIRECT_URL,
+            CLAUDE_DESKTOP_MACOS_DMG_REDIRECT_URL,
+        ],
+        _ => Vec::new(),
     }
-    if cfg!(target_os = "macos") {
-        return Ok(CLAUDE_DESKTOP_MACOS_PKG_REDIRECT_URL);
-    }
-    Err("Claude Desktop update checks are only supported on Windows and macOS".to_string())
 }
 
-fn claude_desktop_latest_asset_name() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "Claude-Desktop-latest.pkg"
+#[cfg(target_os = "macos")]
+fn resolve_claude_desktop_redirect_with_curl(redirect_url: &str) -> Result<String, String> {
+    let output = Command::new("/usr/bin/curl")
+        .args([
+            "--silent",
+            "--show-error",
+            "--dump-header",
+            "-",
+            "--output",
+            "/dev/null",
+            "--max-time",
+            "30",
+            "--user-agent",
+            CLAUDE_DESKTOP_DOWNLOAD_USER_AGENT,
+            "--header",
+            "Accept: application/octet-stream,text/html;q=0.9,*/*;q=0.8",
+            "--header",
+            "Referer: https://claude.ai/download",
+            redirect_url,
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| error.to_string())?;
+    let headers = String::from_utf8_lossy(&output.stdout);
+    if let Some(location) = redirect_location_from_headers(&headers) {
+        return Ok(location);
+    }
+    let status = headers
+        .lines()
+        .rev()
+        .find(|line| line.starts_with("HTTP/"))
+        .unwrap_or("no HTTP status");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(format!("{status}; {}", stderr.trim()))
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn redirect_location_from_headers(headers: &str) -> Option<String> {
+    headers.lines().rev().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("location")
+            .then(|| value.trim().to_string())
+    })
+}
+
+fn claude_desktop_installer_extension(download_url: &str) -> &'static str {
+    let path = download_url.split(['?', '#']).next().unwrap_or(download_url);
+    if path.to_ascii_lowercase().ends_with(".dmg") {
+        "dmg"
+    } else if path.to_ascii_lowercase().ends_with(".msix") {
+        "msix"
     } else {
-        "Claude-Desktop-latest.msix"
+        "pkg"
     }
+}
+
+fn claude_desktop_asset_name_from_url(download_url: &str) -> String {
+    format!(
+        "Claude-Desktop-latest.{}",
+        claude_desktop_installer_extension(download_url)
+    )
 }
 
 fn latest_claude_plus_release() -> Result<(GitHubRelease, Option<GitHubReleaseAsset>), String> {
@@ -1727,7 +1871,54 @@ fn downloads_dir() -> Result<PathBuf, String> {
 fn download_url_to_file_with_progress<F>(
     url: &str,
     path: &Path,
+    on_progress: F,
+) -> Result<(), String>
+where
+    F: FnMut(u64, Option<u64>, Option<u8>),
+{
+    download_url_to_file_with_ureq(
+        url,
+        path,
+        on_progress,
+        "ClaudeDesktopPlusPlus",
+        None,
+        None,
+    )
+}
+
+fn download_claude_desktop_url_to_file_with_progress<F>(
+    url: &str,
+    path: &Path,
+    on_progress: F,
+) -> Result<(), String>
+where
+    F: FnMut(u64, Option<u64>, Option<u8>),
+{
+    #[cfg(target_os = "macos")]
+    {
+        return download_url_to_file_with_curl(url, path, on_progress);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        download_url_to_file_with_ureq(
+            url,
+            path,
+            on_progress,
+            CLAUDE_DESKTOP_DOWNLOAD_USER_AGENT,
+            Some("application/octet-stream,*/*"),
+            Some("https://claude.ai/download"),
+        )
+    }
+}
+
+fn download_url_to_file_with_ureq<F>(
+    url: &str,
+    path: &Path,
     mut on_progress: F,
+    user_agent: &str,
+    accept: Option<&str>,
+    referer: Option<&str>,
 ) -> Result<(), String>
 where
     F: FnMut(u64, Option<u64>, Option<u8>),
@@ -1735,11 +1926,14 @@ where
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(300))
         .build();
-    let response = agent
-        .get(url)
-        .set("User-Agent", "ClaudeDesktopPlusPlus")
-        .call()
-        .map_err(|error| error.to_string())?;
+    let mut request = agent.get(url).set("User-Agent", user_agent);
+    if let Some(accept) = accept {
+        request = request.set("Accept", accept);
+    }
+    if let Some(referer) = referer {
+        request = request.set("Referer", referer);
+    }
+    let response = request.call().map_err(|error| error.to_string())?;
     let total_bytes = response
         .header("content-length")
         .and_then(|value| value.parse::<u64>().ok())
@@ -1790,7 +1984,90 @@ where
     if result.is_err() {
         let _ = fs::remove_file(&partial_path);
     }
-    result?;
+    result
+}
+
+#[cfg(target_os = "macos")]
+fn download_url_to_file_with_curl<F>(
+    url: &str,
+    path: &Path,
+    mut on_progress: F,
+) -> Result<(), String>
+where
+    F: FnMut(u64, Option<u64>, Option<u8>),
+{
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download");
+    let partial_path = path.with_file_name(format!("{file_name}.part"));
+    let mut child = Command::new("/usr/bin/curl")
+        .args([
+            "--fail",
+            "--location",
+            "--silent",
+            "--show-error",
+            "--retry",
+            "2",
+            "--connect-timeout",
+            "20",
+            "--max-time",
+            "600",
+            "--user-agent",
+            CLAUDE_DESKTOP_DOWNLOAD_USER_AGENT,
+            "--header",
+            "Accept: application/octet-stream,*/*",
+            "--referer",
+            "https://claude.ai/download",
+            "--output",
+        ])
+        .arg(&partial_path)
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+
+    let mut last_downloaded = 0_u64;
+    on_progress(0, None, None);
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            break status;
+        }
+        let downloaded = fs::metadata(&partial_path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        if downloaded != last_downloaded {
+            on_progress(downloaded, None, None);
+            last_downloaded = downloaded;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    };
+    let mut stderr = String::new();
+    if let Some(mut stream) = child.stderr.take() {
+        let _ = stream.read_to_string(&mut stderr);
+    }
+    if !status.success() {
+        let _ = fs::remove_file(&partial_path);
+        return Err(format!(
+            "macOS curl download failed (exit {}): {}",
+            status.code().unwrap_or(-1),
+            stderr.trim()
+        ));
+    }
+    let downloaded = fs::metadata(&partial_path)
+        .map_err(|error| error.to_string())?
+        .len();
+    if downloaded == 0 {
+        let _ = fs::remove_file(&partial_path);
+        return Err("downloaded file is empty".to_string());
+    }
+    if path.exists() {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    fs::rename(&partial_path, path).map_err(|error| error.to_string())?;
+    on_progress(downloaded, Some(downloaded), Some(100));
     Ok(())
 }
 
@@ -8987,6 +9264,36 @@ mod tests {
         );
         assert!(is_version_newer("1.24012.10", "1.24012.9"));
         assert!(!is_version_newer("1.24012.9", "1.24012.9"));
+    }
+
+    #[test]
+    fn macos_claude_download_has_pkg_and_dmg_fallbacks() {
+        assert_eq!(
+            claude_desktop_redirect_urls_for_platform("darwin"),
+            vec![
+                CLAUDE_DESKTOP_MACOS_PKG_REDIRECT_URL,
+                CLAUDE_DESKTOP_MACOS_DMG_REDIRECT_URL,
+            ]
+        );
+        assert_eq!(
+            claude_desktop_installer_extension(
+                "https://downloads.claude.ai/releases/darwin/universal/1.2.3/Claude.pkg"
+            ),
+            "pkg"
+        );
+        assert_eq!(
+            claude_desktop_installer_extension(
+                "https://downloads.claude.ai/releases/darwin/universal/1.2.3/Claude.dmg?download=1"
+            ),
+            "dmg"
+        );
+        assert_eq!(
+            redirect_location_from_headers(
+                "HTTP/1.1 307 Temporary Redirect\r\nLocation: https://example.com/Claude.pkg\r\n"
+            )
+            .as_deref(),
+            Some("https://example.com/Claude.pkg")
+        );
     }
 
     #[test]

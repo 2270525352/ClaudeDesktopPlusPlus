@@ -74,6 +74,7 @@ ClaudeDesktopPlusPlus（Claude++）是面向 Claude Desktop 的第三方桌面�
 - `v0.1.47` 使用简短安装包名称，并为 Windows/macOS 增加 Claude Desktop 自动版本检查与一键安装、更新。
 - `v0.1.51` 将连接策略统一为直连优先：新配置不再默认启动 Gateway，OpenAI/Codex 上游缺少 Claude 协议映射时才手动启用 Gateway。
 - `v0.1.52` 增加第三方模型筛选与逐模型 1M 开关；cc-switch 改为只读同步；历史修复支持重置状态；Windows 启动不再出现终端黑框。
+- `v0.1.53` 修复 macOS 一键安装 Claude Desktop 时官方 PKG 地址返回 403 的问题，增加系统 curl、官方 DMG 和下载页多级回退。
 - `v0.1.50` 优化 Claude Desktop 启动流畅度：启动任务后台执行，新版 Windows Claude 直接使用 3P 配置启动，不再重复等待已知失败的 CDP 降级链路。
 - `v0.1.49` 为 Claude Desktop 和 Claude++ 升级增加实时进度条；修复隐藏 PowerShell 处理官方重定向时的 `exit 1`，Windows 安装阶段会按需请求管理员授权并显示详细错误。
 - `v0.1.48` 修复官方最新版本重定向解析，并在应用启动后自动执行版本检查；检查失败时会直接显示错误状态。
