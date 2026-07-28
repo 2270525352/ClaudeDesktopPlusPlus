@@ -41,6 +41,7 @@
       launchClaude: "诊断启动 Claude Desktop",
       launchClaudeInjected: "启动 Claude Desktop",
       launchClaudeClean: "诊断启动",
+      launchStarting: "正在启动 Claude Desktop...",
       connectionMode: "连接模式",
       directModeButton: "直连",
       gatewayModeButton: "Gateway",
@@ -542,6 +543,7 @@
       launchClaude: "Diagnostic Launch Claude Desktop",
       launchClaudeInjected: "Start Claude Desktop",
       launchClaudeClean: "Diagnostic Launch",
+      launchStarting: "Starting Claude Desktop...",
       connectionMode: "Connection",
       directModeButton: "Direct",
       gatewayModeButton: "Gateway",
@@ -1291,6 +1293,7 @@
   let updateStatus = null;
   let updateLoading = false;
   let updateActionLoading = false;
+  let launchActionLoading = false;
   let updateProgressUnlisten = null;
   const lastUpdateProgress = new Map();
   let overviewDiagnosticsStarted = false;
@@ -3392,10 +3395,11 @@
       const launchAction = document.createElement("button");
       launchAction.className = "text-button primary";
       launchAction.type = "button";
+      launchAction.dataset.launchProvider = "true";
       launchAction.textContent = t("providerInjectLaunch");
       launchAction.disabled = !canInject;
       launchAction.addEventListener("click", async () => {
-        await runCommand("launch_claude_desktop_with_provider", { id: provider.id }, (result) => {
+        await runLaunchCommand("launch_claude_desktop_with_provider", { id: provider.id }, (result) => {
           lastLaunchResult = result;
           state.config.active_provider_id = provider.id;
           state.claude_3p = result.claude_3p || state.claude_3p;
@@ -3620,6 +3624,51 @@
       onSuccess?.(result);
     } catch (error) {
       log("ERR", t("commandFailed", { error: String(error) }));
+    }
+  }
+
+  function setLaunchButtonsLoading(loading) {
+    const buttons = document.querySelectorAll(
+      '[data-action="launchClaudeInjected"], [data-action="launchClaudeClean"], [data-launch-provider]',
+    );
+    buttons.forEach((button) => {
+      if (loading) {
+        button.dataset.launchIdleText = button.textContent;
+        button.dataset.launchWasDisabled = button.disabled ? "true" : "false";
+        button.textContent = t("launchStarting");
+        button.disabled = true;
+      } else {
+        button.textContent =
+          button.dataset.launchIdleText ||
+          (button.dataset.action === "launchClaudeClean"
+            ? t("launchClaudeClean")
+            : button.hasAttribute("data-launch-provider")
+              ? t("providerInjectLaunch")
+              : t("launchClaudeInjected"));
+        if (button.dataset.launchWasDisabled) {
+          button.disabled = button.dataset.launchWasDisabled === "true";
+        }
+        delete button.dataset.launchIdleText;
+        delete button.dataset.launchWasDisabled;
+      }
+    });
+  }
+
+  async function runLaunchCommand(command, args, onSuccess) {
+    if (launchActionLoading) return;
+    launchActionLoading = true;
+    setLaunchButtonsLoading(true);
+    showNotice("WARN", t("launchStarting"));
+    try {
+      await nextFrame();
+      const result = await invoke(command, args);
+      if (result === undefined) return;
+      onSuccess?.(result);
+    } catch (error) {
+      log("ERR", t("commandFailed", { error: String(error) }));
+    } finally {
+      launchActionLoading = false;
+      setLaunchButtonsLoading(false);
     }
   }
 
@@ -4048,7 +4097,7 @@
         await activateProvider(provider.id, provider.name);
         log("WARN", t("launchAutoSwitched", { provider: provider.name }));
       }
-      await runCommand("launch_claude_desktop_with_provider", { id: provider.id }, (result) => {
+      await runLaunchCommand("launch_claude_desktop_with_provider", { id: provider.id }, (result) => {
         lastLaunchResult = result;
         state.config.active_provider_id = provider.id;
         state.claude_3p = result.claude_3p || state.claude_3p;
@@ -4073,7 +4122,7 @@
       return;
     }
     if (action === "launchClaudeClean") {
-      await runCommand("launch_claude_desktop", undefined, (result) => {
+      await runLaunchCommand("launch_claude_desktop", undefined, (result) => {
         lastLaunchResult = result;
         state.claude_3p = result.claude_3p || state.claude_3p;
         if (state.config?.gateway) {

@@ -59,6 +59,7 @@ const CLAUDE_PLUS_GITHUB_RELEASE_API: &str =
 const CLAUDE_PLUS_GITHUB_RELEASES_URL: &str =
     "https://github.com/2270525352/ClaudeDesktopPlusPlus/releases";
 const UPDATE_PROGRESS_EVENT: &str = "update-progress";
+const WINDOWS_CDP_STARTUP_REJECTED_FROM_VERSION: &str = "1.24012.9";
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -2836,11 +2837,17 @@ fn upsert_builtin_script(config: &mut AppConfig, id: &str, name: &str, code: &st
 }
 
 #[tauri::command]
-fn launch_claude_desktop() -> Result<LaunchResult, String> {
+async fn launch_claude_desktop() -> Result<LaunchResult, String> {
+    tauri::async_runtime::spawn_blocking(launch_claude_desktop_sync)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn launch_claude_desktop_sync() -> Result<LaunchResult, String> {
     let install = detect_claude_install().ok_or("Claude Desktop install was not found")?;
     let config = read_config().map_err(|error| error.to_string())?;
     let restored = restore_official_claude_config_impl()?;
-    terminate_claude_processes().map_err(|error| error.to_string())?;
+    terminate_claude_processes(Some(&install)).map_err(|error| error.to_string())?;
     let launched = launch_claude_plain(&install, &config, LaunchMode::Clean)
         .map_err(|error| error.to_string())?;
     let process_id = launched.process_id;
@@ -2866,7 +2873,13 @@ fn launch_claude_desktop() -> Result<LaunchResult, String> {
 }
 
 #[tauri::command]
-fn launch_claude_desktop_current_provider() -> Result<LaunchResult, String> {
+async fn launch_claude_desktop_current_provider() -> Result<LaunchResult, String> {
+    tauri::async_runtime::spawn_blocking(launch_claude_desktop_current_provider_sync)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn launch_claude_desktop_current_provider_sync() -> Result<LaunchResult, String> {
     let install = detect_claude_install().ok_or("Claude Desktop install was not found")?;
     let mut config = read_config().map_err(|error| error.to_string())?;
     let _ = apply_cc_switch_sync(&mut config);
@@ -2896,15 +2909,13 @@ fn launch_claude_desktop_current_provider() -> Result<LaunchResult, String> {
     let launch_install = prepare_launch_install(&install, &config)?;
     let live_injection_supported = live_injection_supported_for_install(&launch_install);
     let cdp_port = cdp_injection_supported_for_install(&launch_install).then(find_cdp_port);
-    terminate_claude_processes().map_err(|error| error.to_string())?;
-    let launched = launch_claude_plain(
-        &launch_install,
-        &config,
-        LaunchMode::Inject {
-            cdp_port: cdp_port.unwrap_or(DEFAULT_CDP_PORT),
-        },
-    )
-    .map_err(|error| error.to_string())?;
+    terminate_claude_processes(Some(&launch_install)).map_err(|error| error.to_string())?;
+    let launch_mode = cdp_port
+        .map(|cdp_port| LaunchMode::Inject { cdp_port })
+        .unwrap_or(LaunchMode::Clean);
+    let launched =
+        launch_claude_plain(&launch_install, &config, launch_mode)
+            .map_err(|error| error.to_string())?;
     let process_id = launched.process_id;
     let cdp_enabled = launched.cdp_enabled;
     let launch_cdp_error = launched.cdp_error.clone();
@@ -2939,7 +2950,13 @@ fn launch_claude_desktop_current_provider() -> Result<LaunchResult, String> {
 }
 
 #[tauri::command]
-fn launch_claude_desktop_with_provider(id: String) -> Result<LaunchResult, String> {
+async fn launch_claude_desktop_with_provider(id: String) -> Result<LaunchResult, String> {
+    tauri::async_runtime::spawn_blocking(move || launch_claude_desktop_with_provider_sync(id))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn launch_claude_desktop_with_provider_sync(id: String) -> Result<LaunchResult, String> {
     let install = detect_claude_install().ok_or("Claude Desktop install was not found")?;
     let mut config = read_config().map_err(|error| error.to_string())?;
     let _ = apply_cc_switch_sync(&mut config);
@@ -2962,15 +2979,13 @@ fn launch_claude_desktop_with_provider(id: String) -> Result<LaunchResult, Strin
     let launch_install = prepare_launch_install(&install, &config)?;
     let live_injection_supported = live_injection_supported_for_install(&launch_install);
     let cdp_port = cdp_injection_supported_for_install(&launch_install).then(find_cdp_port);
-    terminate_claude_processes().map_err(|error| error.to_string())?;
-    let launched = launch_claude_plain(
-        &launch_install,
-        &config,
-        LaunchMode::Inject {
-            cdp_port: cdp_port.unwrap_or(DEFAULT_CDP_PORT),
-        },
-    )
-    .map_err(|error| error.to_string())?;
+    terminate_claude_processes(Some(&launch_install)).map_err(|error| error.to_string())?;
+    let launch_mode = cdp_port
+        .map(|cdp_port| LaunchMode::Inject { cdp_port })
+        .unwrap_or(LaunchMode::Clean);
+    let launched =
+        launch_claude_plain(&launch_install, &config, launch_mode)
+            .map_err(|error| error.to_string())?;
     let process_id = launched.process_id;
     let cdp_enabled = launched.cdp_enabled;
     let launch_cdp_error = launched.cdp_error.clone();
@@ -3062,7 +3077,7 @@ fn launch_claude_plain(
         Err(error) if matches!(mode, LaunchMode::Inject { .. }) => {
             let _ = child.kill();
             let _ = child.wait();
-            terminate_claude_processes()?;
+            terminate_claude_processes(Some(install))?;
 
             let mut fallback_child = spawn_claude_child(install, config, LaunchMode::Clean)?;
             let process_id = confirm_spawned_claude_process(install, &mut fallback_child)
@@ -3302,11 +3317,21 @@ fn prepare_launch_install(
 }
 
 fn live_injection_supported_for_install(install: &ClaudeInstall) -> bool {
-    install.app_user_model_id.is_none()
+    install.app_user_model_id.is_none() && !windows_install_rejects_cdp_startup(install)
 }
 
 fn cdp_injection_supported_for_install(install: &ClaudeInstall) -> bool {
     install.app_user_model_id.is_none() && !preload_injection_install(install)
+        && !windows_install_rejects_cdp_startup(install)
+}
+
+fn windows_install_rejects_cdp_startup(install: &ClaudeInstall) -> bool {
+    cfg!(target_os = "windows")
+        && install.app_user_model_id.is_none()
+        && claude_version_for_install(install).is_some_and(|version| {
+            compare_versions(&version, WINDOWS_CDP_STARTUP_REJECTED_FROM_VERSION)
+                != std::cmp::Ordering::Less
+        })
 }
 
 fn preload_injection_install(install: &ClaudeInstall) -> bool {
@@ -4441,7 +4466,8 @@ fn repair_history_from_profile(input: HistoryRepairInput) -> Result<HistoryRepai
         );
     }
 
-    terminate_claude_processes().map_err(|error| error.to_string())?;
+    let install = detect_claude_install();
+    terminate_claude_processes(install.as_ref()).map_err(|error| error.to_string())?;
     fs::create_dir_all(&target).map_err(|error| error.to_string())?;
     let backup_path = history_backup_root().join(format!("repair-{}", unix_millis()));
     fs::create_dir_all(&backup_path).map_err(|error| error.to_string())?;
@@ -4960,7 +4986,7 @@ fn claude_desktop_current_version() -> Option<String> {
         .or_else(|| {
             detect_claude_install()
                 .as_ref()
-                .and_then(|install| claude_version_from_install_path(&install.executable))
+                .and_then(claude_version_for_install)
         });
     }
     #[cfg(target_os = "macos")]
@@ -4974,6 +5000,11 @@ fn claude_desktop_current_version() -> Option<String> {
     {
         None
     }
+}
+
+fn claude_version_for_install(install: &ClaudeInstall) -> Option<String> {
+    claude_version_from_install_path(&install.executable)
+        .or_else(|| claude_version_from_squirrel_root(&install.executable))
 }
 
 fn claude_version_from_install_path(path: &Path) -> Option<String> {
@@ -4991,6 +5022,26 @@ fn claude_version_from_install_path(path: &Path) -> Option<String> {
         }
     }
     None
+}
+
+fn claude_version_from_squirrel_root(path: &Path) -> Option<String> {
+    let root = path.ancestors().find(|ancestor| {
+        ancestor
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case("AnthropicClaude"))
+    })?;
+    fs::read_dir(root)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.strip_prefix("app-")
+                .filter(|version| is_version_like(version))
+                .map(ToString::to_string)
+        })
+        .max_by(|left, right| compare_versions(left, right))
 }
 
 #[cfg(target_os = "macos")]
@@ -5181,7 +5232,9 @@ fn write_json_file(path: &Path, value: &Value) -> Result<(), String> {
 }
 
 fn verify_launch(before: GatewaySnapshot, expect_gateway: bool) -> LaunchVerification {
-    std::thread::sleep(Duration::from_millis(1200));
+    if expect_gateway {
+        std::thread::sleep(Duration::from_millis(1200));
+    }
     let after = gateway_snapshot();
     let request_delta = after.request_count.saturating_sub(before.request_count);
     let forwarded_delta = after.forwarded_count.saturating_sub(before.forwarded_count);
@@ -5209,7 +5262,7 @@ fn verify_launch(before: GatewaySnapshot, expect_gateway: bool) -> LaunchVerific
         "gateway_hit_upstream_error".to_string()
     } else if expect_gateway && gateway_hit && deployment_mode.as_deref() == Some("3p") {
         "verified_gateway_hit".to_string()
-    } else if !expect_gateway && deployment_mode.as_deref() == Some("3p") && has_3p_log {
+    } else if !expect_gateway && deployment_mode.as_deref() == Some("3p") {
         "verified_direct_3p_config".to_string()
     } else if deployment_mode.as_deref() == Some("3p") && has_3p_log {
         "3p_config_applied_but_no_gateway_request_yet".to_string()
@@ -5359,29 +5412,104 @@ fn claude_main_log_paths() -> Vec<PathBuf> {
     paths
 }
 
-fn terminate_claude_processes() -> anyhow::Result<()> {
+fn terminate_claude_processes(install: Option<&ClaudeInstall>) -> anyhow::Result<()> {
     if cfg!(target_os = "windows") {
-        let mut command = Command::new("taskkill");
-        hide_child_console(&mut command);
-        let _ = command
-            .args(["/IM", "claude.exe", "/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        std::thread::sleep(Duration::from_millis(900));
+        let executable = install
+            .map(|install| path_string(&install.executable))
+            .unwrap_or_default();
+        let working_dir = install
+            .map(|install| path_string(&install.working_dir))
+            .unwrap_or_default();
+        let script = format!(
+            r#"
+$Executable = {executable}
+$WorkingDir = {working_dir}
+$claude = @(Get-CimInstance Win32_Process -Filter "Name = 'claude.exe'" -ErrorAction SilentlyContinue |
+  Where-Object {{
+    $PathText = if ($_.ExecutablePath) {{ $_.ExecutablePath }} else {{ $_.CommandLine }}
+    $KnownDesktop = $PathText -and (
+      $PathText.IndexOf('\AnthropicClaude\', [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+      $PathText.IndexOf('\WindowsApps\Claude_', [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+    )
+    $SelectedInstall = $PathText -and (
+      ($Executable -and $PathText.IndexOf($Executable, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+      ($WorkingDir -and $PathText.IndexOf($WorkingDir, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)
+    )
+    $KnownDesktop -or $SelectedInstall
+  }})
+if ($claude.Count -eq 0) {{ exit 0 }}
+
+$ids = @{{}}
+foreach ($process in $claude) {{ $ids[[uint32]$process.ProcessId] = $true }}
+$roots = @($claude | Where-Object {{ -not $ids.ContainsKey([uint32]$_.ParentProcessId) }})
+if ($roots.Count -eq 0) {{ $roots = $claude }}
+
+foreach ($root in $roots) {{
+  & taskkill.exe /PID $root.ProcessId /T /F 2>&1 | Out-Null
+}}
+
+$remaining = @($claude | Where-Object {{ Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }})
+if ($remaining.Count -gt 0) {{
+  foreach ($process in $remaining) {{
+    & taskkill.exe /PID $process.ProcessId /T /F 2>&1 | Out-Null
+  }}
+}}
+"#,
+            executable = powershell_single_quoted(&executable),
+            working_dir = powershell_single_quoted(&working_dir)
+        );
+        let output = run_powershell_script_with_timeout(&script, Duration::from_secs(12))
+            .map_err(anyhow::Error::msg)?;
+        if !output.status.success() {
+            return Err(anyhow::anyhow!(format_command_failure(&output)));
+        }
         return Ok(());
     }
     if cfg!(target_os = "macos") {
         let _ = Command::new("pkill")
-            .args(["-x", "Claude"])
+            .args(["-TERM", "-x", "Claude"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
-        std::thread::sleep(Duration::from_millis(900));
+        if wait_for_macos_claude_exit(Duration::from_millis(1500)) {
+            return Ok(());
+        }
+        let _ = Command::new("pkill")
+            .args(["-KILL", "-x", "Claude"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        if !wait_for_macos_claude_exit(Duration::from_millis(500)) {
+            anyhow::bail!("Claude Desktop did not exit after TERM and KILL");
+        }
     }
     Ok(())
+}
+
+fn wait_for_macos_claude_exit(timeout: Duration) -> bool {
+    let started_at = Instant::now();
+    while started_at.elapsed() < timeout {
+        if !macos_claude_process_running() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    !macos_claude_process_running()
+}
+
+fn macos_claude_process_running() -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    Command::new("pgrep")
+        .args(["-x", "Claude"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn ensure_gateway_runtime(config: &AppConfig) -> Result<(), String> {
@@ -8395,7 +8523,7 @@ fn configure_desktop_shell(app: &mut tauri::App) -> tauri::Result<()> {
             "show" => show_main_window(app),
             "launch-claude" => {
                 tauri::async_runtime::spawn_blocking(|| {
-                    if let Err(error) = launch_claude_desktop_current_provider() {
+                    if let Err(error) = launch_claude_desktop_current_provider_sync() {
                         eprintln!("[Claude++] tray launch failed: {error}");
                     }
                 });
@@ -8606,7 +8734,7 @@ fn run_headless_command() -> bool {
         return false;
     }
 
-    match launch_claude_desktop_current_provider() {
+    match launch_claude_desktop_current_provider_sync() {
         Ok(result) => {
             match serde_json::to_string_pretty(&result) {
                 Ok(json) => println!("{json}"),
@@ -8732,6 +8860,56 @@ mod tests {
             injection_channel_label_for_launch(&install, false, true),
             "live_script_plus_direct_config"
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn current_windows_claude_skips_rejected_cdp_startup_path() {
+        let current = ClaudeInstall {
+            executable: PathBuf::from(
+                r"C:\Users\tester\AppData\Local\AnthropicClaude\app-1.24012.9\claude.exe",
+            ),
+            working_dir: PathBuf::from("."),
+            source: "test",
+            app_user_model_id: None,
+        };
+        let older = ClaudeInstall {
+            executable: PathBuf::from(
+                r"C:\Users\tester\AppData\Local\AnthropicClaude\app-1.15962.1\claude.exe",
+            ),
+            working_dir: PathBuf::from("."),
+            source: "test",
+            app_user_model_id: None,
+        };
+
+        assert!(!live_injection_supported_for_install(&current));
+        assert!(!cdp_injection_supported_for_install(&current));
+        assert!(live_injection_supported_for_install(&older));
+        assert!(cdp_injection_supported_for_install(&older));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn squirrel_stub_uses_latest_sibling_version_for_cdp_policy() {
+        let root = std::env::temp_dir()
+            .join(format!("claude-plus-{}", Uuid::new_v4()))
+            .join("AnthropicClaude");
+        fs::create_dir_all(root.join("app-1.15962.1")).unwrap();
+        fs::create_dir_all(root.join("app-1.24012.9")).unwrap();
+        let install = ClaudeInstall {
+            executable: root.join("claude.exe"),
+            working_dir: root.clone(),
+            source: "test",
+            app_user_model_id: None,
+        };
+
+        assert_eq!(
+            claude_version_for_install(&install).as_deref(),
+            Some("1.24012.9")
+        );
+        assert!(windows_install_rejects_cdp_startup(&install));
+
+        fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
 
     #[test]
