@@ -71,6 +71,7 @@ ClaudeDesktopPlusPlus（Claude++）是面向 Claude Desktop 的第三方桌面�
 
 ### 版本记录
 
+- `v0.1.59` 修复窗口最小化与关闭行为：最小化保留在任务栏，点击关闭隐藏到系统托盘，只有通过托盘菜单“退出 Claude++”才会完全退出。
 - `v0.1.58` 修复未安装或未探测到 Claude CLI 时无法同步官方插件市场的问题；目录可直接通过 Git 同步，插件安装仍由 Claude CLI 完成。
 - `v0.1.57` 修复 macOS 上 Claude Desktop 假启动和汉化假成功：改用 LaunchServices 启动并校验真实应用进程，补齐官方/3P locale 与应用级语言偏好，汉化状态会区分“已配置”和“已生效”。
 - `v0.1.56` 将 macOS Claude Desktop 安装切换为官方 Universal DMG，并让“系统就绪”按 Windows/macOS 分别展示对应的检查项目。
