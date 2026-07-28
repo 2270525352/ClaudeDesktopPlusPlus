@@ -58,6 +58,8 @@ const CLAUDE_DESKTOP_MACOS_DMG_REDIRECT_URL: &str =
     "https://claude.ai/api/desktop/darwin/universal/dmg/latest/redirect";
 const CLAUDE_DESKTOP_DOWNLOAD_USER_AGENT: &str =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15";
+#[cfg(target_os = "macos")]
+const ANTHROPIC_MACOS_TEAM_ID: &str = "Q6L2SF6YDW";
 const CLAUDE_PLUS_GITHUB_RELEASE_API: &str =
     "https://api.github.com/repos/2270525352/ClaudeDesktopPlusPlus/releases/latest";
 const CLAUDE_PLUS_GITHUB_RELEASES_URL: &str =
@@ -571,6 +573,7 @@ fn finish_update_progress<T: UpdateOutcome>(
 
 #[derive(Debug, Clone, Serialize, Default)]
 struct LocalizationPatchStatus {
+    strategy: String,
     resources_dir: String,
     desktop_json: bool,
     frontend_json: bool,
@@ -578,6 +581,8 @@ struct LocalizationPatchStatus {
     whitelist_patched: bool,
     locale_paths: Vec<String>,
     current_locale: Option<String>,
+    signature_valid: Option<bool>,
+    legacy_bundle_patch_detected: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -1385,17 +1390,28 @@ fn install_claude_macos_package_sync(
     if !cfg!(target_os = "macos") {
         return Err("Claude Desktop PKG installation is only supported on macOS".to_string());
     }
-    if !force_upgrade && detect_claude_install().is_some() {
-        return Ok(SystemActionResult {
-            ok: true,
-            exit_code: Some(0),
-            message: "Claude Desktop is already installed.".to_string(),
-            stdout: String::new(),
-            stderr: String::new(),
-            reboot_required: false,
-            downloaded_path: None,
-            system: system_readiness(),
-        });
+    let mut repair_reason = None;
+    if !force_upgrade {
+        if let Some(install) = detect_claude_install() {
+            match ensure_macos_claude_launchable(&install) {
+                Ok(integrity) => {
+                    return Ok(SystemActionResult {
+                        ok: true,
+                        exit_code: Some(0),
+                        message: "Claude Desktop is already installed and passed the macOS integrity check."
+                            .to_string(),
+                        stdout: integrity,
+                        stderr: String::new(),
+                        reboot_required: false,
+                        downloaded_path: None,
+                        system: system_readiness(),
+                    });
+                }
+                Err(error) => {
+                    repair_reason = Some(error);
+                }
+            }
+        }
     }
 
     emit_update_progress(
@@ -1443,7 +1459,11 @@ fn install_claude_macos_package_sync(
     Ok(SystemActionResult {
         ok: true,
         exit_code: None,
-        message: if force_upgrade {
+        message: if repair_reason.is_some() {
+            format!(
+                "Claude Desktop failed the macOS integrity check. A fresh official {installer_kind} has been downloaded and opened for repair."
+            )
+        } else if force_upgrade {
             format!(
                 "Claude Desktop {installer_kind} was downloaded and opened. Complete the macOS installer to upgrade."
             )
@@ -1452,7 +1472,11 @@ fn install_claude_macos_package_sync(
                 "Claude Desktop {installer_kind} was downloaded and opened. Complete the macOS installer to install."
             )
         },
-        stdout: format!("Downloaded {download_url}"),
+        stdout: [repair_reason, Some(format!("Downloaded {download_url}"))]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n"),
         stderr: String::new(),
         reboot_required: false,
         downloaded_path: Some(path_string(&package_path)),
@@ -1473,6 +1497,12 @@ fn download_claude_macos_installer(
                     continue;
                 }
             };
+        if !trusted_claude_desktop_download_url(&download_url) {
+            failures.push(format!(
+                "{redirect_url}: rejected unexpected download host in {download_url}"
+            ));
+            continue;
+        }
         let version_label = latest_version.as_deref().unwrap_or("latest");
         let extension = claude_desktop_installer_extension(&download_url);
         let package_path = downloads_dir()?.join(format!(
@@ -1497,7 +1527,16 @@ fn download_claude_macos_installer(
             },
         );
         match download_result {
-            Ok(()) => return Ok((download_url, package_path)),
+            Ok(()) => match verify_macos_downloaded_installer(&package_path) {
+                Ok(()) => return Ok((download_url, package_path)),
+                Err(error) => {
+                    let _ = fs::remove_file(&package_path);
+                    failures.push(format!(
+                        "{} verification failed: {error}",
+                        path_string(&package_path)
+                    ));
+                }
+            },
             Err(error) => failures.push(format!("{download_url}: {error}")),
         }
     }
@@ -1505,6 +1544,68 @@ fn download_claude_macos_installer(
         "Unable to download the official Claude Desktop installer. {}",
         failures.join(" | ")
     ))
+}
+
+fn trusted_claude_desktop_download_url(url: &str) -> bool {
+    url.starts_with("https://downloads.claude.ai/")
+}
+
+fn verify_macos_downloaded_installer(path: &Path) -> Result<(), String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        match path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("pkg") => {
+                let output = Command::new("/usr/sbin/pkgutil")
+                    .args(["--check-signature"])
+                    .arg(path)
+                    .stdin(Stdio::null())
+                    .output()
+                    .map_err(|error| error.to_string())?;
+                if !output.status.success() {
+                    return Err(format_command_failure(&output));
+                }
+                let details = format!(
+                    "{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                if !details.contains(ANTHROPIC_MACOS_TEAM_ID) {
+                    return Err(format!(
+                        "PKG has an unexpected signing identity; expected Anthropic team {ANTHROPIC_MACOS_TEAM_ID}"
+                    ));
+                }
+                Ok(())
+            }
+            Some("dmg") => {
+                let output = Command::new("/usr/bin/hdiutil")
+                    .args(["verify"])
+                    .arg(path)
+                    .stdin(Stdio::null())
+                    .output()
+                    .map_err(|error| error.to_string())?;
+                if output.status.success() {
+                    Ok(())
+                } else {
+                    Err(format_command_failure(&output))
+                }
+            }
+            _ => Err(format!(
+                "Unsupported macOS Claude Desktop installer: {}",
+                path.display()
+            )),
+        }
+    }
 }
 
 fn update_status_sync() -> Result<UpdateStatus, String> {
@@ -2566,6 +2667,20 @@ struct LocalizationStage {
 
 fn install_chinese_localization_patch() -> Result<(String, String, String), String> {
     let install = detect_claude_install().ok_or("Claude Desktop install was not found")?;
+    #[cfg(target_os = "macos")]
+    {
+        let integrity = ensure_macos_claude_launchable(&install)?;
+        let locale_paths = set_claude_locale("zh-CN")?;
+        return Ok((
+            format!(
+                "Chinese localization enabled through locale configuration and the runtime script. The signed Claude.app bundle was not modified. Locale written to {} config file(s).",
+                locale_paths.len()
+            ),
+            integrity,
+            String::new(),
+        ));
+    }
+
     let resources_dir = claude_resources_dir(&install);
     if !resources_dir.is_dir() {
         return Err(format!(
@@ -2607,6 +2722,20 @@ fn install_chinese_localization_patch() -> Result<(String, String, String), Stri
 
 fn uninstall_chinese_localization_patch() -> Result<(String, String, String), String> {
     let install = detect_claude_install().ok_or("Claude Desktop install was not found")?;
+    #[cfg(target_os = "macos")]
+    {
+        let integrity = ensure_macos_claude_launchable(&install)?;
+        let locale_paths = set_claude_locale("en-US")?;
+        return Ok((
+            format!(
+                "Chinese localization runtime script disabled. The signed Claude.app bundle was not modified. Locale restored to en-US in {} config file(s).",
+                locale_paths.len()
+            ),
+            integrity,
+            String::new(),
+        ));
+    }
+
     let resources_dir = claude_resources_dir(&install);
     if !resources_dir.is_dir() {
         return Err(format!(
@@ -2662,18 +2791,264 @@ fn write_localization_stage_files() -> Result<LocalizationStage, String> {
 }
 
 fn claude_resources_dir(install: &ClaudeInstall) -> PathBuf {
-    if cfg!(target_os = "macos") {
-        if install
-            .working_dir
-            .file_name()
-            .is_some_and(|name| name == "MacOS")
-        {
-            if let Some(contents_dir) = install.working_dir.parent() {
-                return contents_dir.join("Resources");
-            }
+    if install
+        .working_dir
+        .file_name()
+        .is_some_and(|name| name == "MacOS")
+    {
+        if let Some(contents_dir) = install.working_dir.parent() {
+            return contents_dir.join("Resources");
         }
     }
     install.working_dir.join("resources")
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn macos_app_bundle_for_install(install: &ClaudeInstall) -> Option<PathBuf> {
+    install.executable.ancestors().find_map(|path| {
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
+            .then(|| path.to_path_buf())
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn legacy_macos_localization_patch_detected(resources_dir: &Path) -> bool {
+    [
+        (
+            resources_dir.join("zh-CN.json"),
+            LOCALIZATION_DESKTOP_ZH_CN,
+        ),
+        (
+            resources_dir
+                .join("ion-dist")
+                .join("i18n")
+                .join("zh-CN.json"),
+            LOCALIZATION_FRONTEND_ZH_CN,
+        ),
+        (
+            resources_dir
+                .join("ion-dist")
+                .join("i18n")
+                .join("statsig")
+                .join("zh-CN.json"),
+            LOCALIZATION_STATSIG_ZH_CN,
+        ),
+    ]
+    .into_iter()
+    .any(|(path, expected)| {
+        fs::read_to_string(path)
+            .map(|contents| contents == expected)
+            .unwrap_or(false)
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn remove_legacy_macos_localization_patch(
+    install: &ClaudeInstall,
+) -> Result<Vec<String>, String> {
+    let resources_dir = claude_resources_dir(install);
+    let resource_files = [
+        (
+            resources_dir.join("zh-CN.json"),
+            LOCALIZATION_DESKTOP_ZH_CN,
+        ),
+        (
+            resources_dir
+                .join("ion-dist")
+                .join("i18n")
+                .join("zh-CN.json"),
+            LOCALIZATION_FRONTEND_ZH_CN,
+        ),
+        (
+            resources_dir
+                .join("ion-dist")
+                .join("i18n")
+                .join("statsig")
+                .join("zh-CN.json"),
+            LOCALIZATION_STATSIG_ZH_CN,
+        ),
+    ];
+    let mut restored = Vec::new();
+    for (path, expected) in resource_files {
+        let matches_legacy_patch = fs::read_to_string(&path)
+            .map(|contents| contents == expected)
+            .unwrap_or(false);
+        if matches_legacy_patch {
+            fs::remove_file(&path).map_err(|error| error.to_string())?;
+            restored.push(path_string(&path));
+        }
+    }
+    if restored.is_empty() {
+        return Ok(restored);
+    }
+
+    let base = r#"["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt-BR","id-ID"]"#;
+    let with_zh = r#"["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt-BR","id-ID","zh-CN"]"#;
+    let mut files = Vec::new();
+    collect_js_files(&resources_dir.join("ion-dist").join("assets"), &mut files);
+    for path in files {
+        let Ok(contents) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let next = contents.replace(with_zh, base);
+        if next != contents {
+            fs::write(&path, next).map_err(|error| error.to_string())?;
+            restored.push(path_string(&path));
+        }
+    }
+    Ok(restored)
+}
+
+fn ensure_macos_claude_launchable(install: &ClaudeInstall) -> Result<String, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = install;
+        return Ok(String::new());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let bundle = macos_app_bundle_for_install(install)
+            .ok_or_else(|| "Claude.app bundle could not be located".to_string())?;
+        let mut notes = Vec::new();
+        let mut repaired_legacy_patch = false;
+        if let Err(initial_error) = verify_anthropic_macos_app_signature(&bundle) {
+            let restored = remove_legacy_macos_localization_patch(install)?;
+            if restored.is_empty() {
+                return Err(format!(
+                    "Claude.app code signature is invalid and no reversible Claude++ localization patch was found. Reinstall Claude Desktop from System Readiness. {initial_error}"
+                ));
+            }
+            verify_anthropic_macos_app_signature(&bundle).map_err(|after_cleanup| {
+                format!(
+                    "Claude++ removed {} legacy localization file(s), but Claude.app is still invalid. Reinstall Claude Desktop from System Readiness. {after_cleanup}",
+                    restored.len()
+                )
+            })?;
+            repaired_legacy_patch = true;
+            notes.push(format!(
+                "Removed {} legacy localization modification(s) from the signed Claude.app bundle.",
+                restored.len()
+            ));
+        }
+
+        if repaired_legacy_patch {
+            match clear_macos_quarantine(&bundle) {
+                Ok(true) => notes.push("Cleared stale Gatekeeper quarantine metadata.".to_string()),
+                Ok(false) => {}
+                Err(error) => notes.push(format!(
+                    "Claude.app signature was repaired, but quarantine metadata could not be cleared: {error}"
+                )),
+            }
+        }
+
+        if let Err(initial_assessment) = assess_macos_gatekeeper(&bundle) {
+            let cleared = clear_macos_quarantine(&bundle).unwrap_or(false);
+            if !cleared || assess_macos_gatekeeper(&bundle).is_err() {
+                return Err(format!(
+                    "macOS Gatekeeper rejected the signed Claude.app bundle. Reinstall Claude Desktop from System Readiness. {initial_assessment}"
+                ));
+            }
+            notes.push("Cleared Gatekeeper quarantine metadata after signature verification.".to_string());
+        }
+
+        if notes.is_empty() {
+            notes.push("Claude.app signature and Gatekeeper assessment are valid.".to_string());
+        }
+        Ok(notes.join("\n"))
+    }
+}
+
+fn macos_signature_valid_for_status(install: &ClaudeInstall) -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        let bundle = macos_app_bundle_for_install(install)?;
+        return Some(verify_anthropic_macos_app_signature(&bundle).is_ok());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = install;
+        None
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn verify_anthropic_macos_app_signature(bundle: &Path) -> Result<String, String> {
+    let verification = Command::new("/usr/bin/codesign")
+        .args(["--verify", "--deep", "--strict", "--verbose=2"])
+        .arg(bundle)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !verification.status.success() {
+        return Err(format_command_failure(&verification));
+    }
+
+    let details = Command::new("/usr/bin/codesign")
+        .args(["--display", "--verbose=4"])
+        .arg(bundle)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !details.status.success() {
+        return Err(format_command_failure(&details));
+    }
+    let output = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&details.stdout),
+        String::from_utf8_lossy(&details.stderr)
+    );
+    if !output.contains(&format!("TeamIdentifier={ANTHROPIC_MACOS_TEAM_ID}")) {
+        return Err(format!(
+            "Claude.app has an unexpected signing identity; expected Anthropic team {ANTHROPIC_MACOS_TEAM_ID}"
+        ));
+    }
+    Ok(format!(
+        "Claude.app signature is valid for Anthropic team {ANTHROPIC_MACOS_TEAM_ID}"
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn assess_macos_gatekeeper(bundle: &Path) -> Result<(), String> {
+    let output = Command::new("/usr/sbin/spctl")
+        .args(["--assess", "--type", "execute", "--verbose=4"])
+        .arg(bundle)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format_command_failure(&output))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn clear_macos_quarantine(bundle: &Path) -> Result<bool, String> {
+    let probe = Command::new("/usr/bin/xattr")
+        .args(["-p", "com.apple.quarantine"])
+        .arg(bundle)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|error| error.to_string())?;
+    if !probe.success() {
+        return Ok(false);
+    }
+    let output = Command::new("/usr/bin/xattr")
+        .args(["-d", "com.apple.quarantine"])
+        .arg(bundle)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(true)
+    } else {
+        Err(format_command_failure(&output))
+    }
 }
 
 fn apply_chinese_localization_resources(
@@ -2687,7 +3062,13 @@ fn apply_chinese_localization_resources(
         return run_windows_localization_task(install, resources_dir, stage, install_patch);
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        let _ = (install, resources_dir, stage, install_patch);
+        Err("Claude++ does not modify the signed Claude.app bundle on macOS".to_string())
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         apply_localization_resources_direct(resources_dir, stage, install_patch)
     }
@@ -2899,7 +3280,7 @@ try {{
     )
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn apply_localization_resources_direct(
     resources_dir: &Path,
     stage: &LocalizationStage,
@@ -2962,7 +3343,17 @@ fn localization_patch_status() -> LocalizationPatchStatus {
         return LocalizationPatchStatus::default();
     };
     let resources_dir = claude_resources_dir(&install);
+    #[cfg(target_os = "macos")]
+    let legacy_bundle_patch_detected =
+        legacy_macos_localization_patch_detected(&resources_dir);
+    #[cfg(not(target_os = "macos"))]
+    let legacy_bundle_patch_detected = false;
     LocalizationPatchStatus {
+        strategy: if cfg!(target_os = "macos") {
+            "runtime_script_and_locale_config".to_string()
+        } else {
+            "resource_patch".to_string()
+        },
         resources_dir: path_string(&resources_dir),
         desktop_json: resources_dir.join("zh-CN.json").is_file(),
         frontend_json: resources_dir
@@ -2976,13 +3367,19 @@ fn localization_patch_status() -> LocalizationPatchStatus {
             .join("statsig")
             .join("zh-CN.json")
             .is_file(),
-        whitelist_patched: localization_whitelist_patched(&resources_dir),
+        whitelist_patched: if cfg!(target_os = "macos") {
+            legacy_bundle_patch_detected
+        } else {
+            localization_whitelist_patched(&resources_dir)
+        },
         locale_paths: claude_locale_config_paths()
             .into_iter()
             .filter(|path| path.is_file())
             .map(|path| path_string(&path))
             .collect(),
         current_locale: current_claude_locale(),
+        signature_valid: macos_signature_valid_for_status(&install),
+        legacy_bundle_patch_detected,
     }
 }
 
@@ -3079,7 +3476,7 @@ fn localization_whitelist_patched(resources_dir: &Path) -> bool {
     })
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn patch_language_whitelist_in_resources(
     resources_dir: &Path,
     install_patch: bool,
@@ -3226,7 +3623,9 @@ fn launch_claude_desktop_current_provider_sync() -> Result<LaunchResult, String>
     let effective_cdp_port = cdp_port.filter(|_| cdp_enabled);
     let cdp_result = effective_cdp_port.map(|port| inject_claude_via_cdp(&config, port));
     let cdp_injected = cdp_result.as_ref().is_some_and(Result::is_ok);
-    let cdp_error = launch_cdp_error.or_else(|| cdp_result.and_then(Result::err));
+    let cdp_error = launch_cdp_error
+        .or_else(|| cdp_result.and_then(Result::err))
+        .map(classify_cdp_error);
     wait_for_launched_child(launched);
 
     Ok(LaunchResult {
@@ -3296,7 +3695,9 @@ fn launch_claude_desktop_with_provider_sync(id: String) -> Result<LaunchResult, 
     let effective_cdp_port = cdp_port.filter(|_| cdp_enabled);
     let cdp_result = effective_cdp_port.map(|port| inject_claude_via_cdp(&config, port));
     let cdp_injected = cdp_result.as_ref().is_some_and(Result::is_ok);
-    let cdp_error = launch_cdp_error.or_else(|| cdp_result.and_then(Result::err));
+    let cdp_error = launch_cdp_error
+        .or_else(|| cdp_result.and_then(Result::err))
+        .map(classify_cdp_error);
     wait_for_launched_child(launched);
 
     Ok(LaunchResult {
@@ -3354,6 +3755,8 @@ fn launch_claude_plain(
     config: &AppConfig,
     mode: LaunchMode,
 ) -> anyhow::Result<LaunchedClaude> {
+    ensure_macos_claude_launchable(install).map_err(anyhow::Error::msg)?;
+
     if let Some(app_user_model_id) = install.app_user_model_id.as_ref() {
         let activation_process_id =
             activate_windows_app(app_user_model_id, "").map_err(|error| anyhow::anyhow!(error))?;
@@ -3785,6 +4188,18 @@ fn inject_claude_via_cdp(config: &AppConfig, cdp_port: u16) -> Result<(), String
         .ok_or_else(|| "Claude CDP target did not expose a websocket URL".to_string())?;
     cdp::inject_script(&websocket_url, &build_inject_script(config))
         .map_err(|error| error.to_string())
+}
+
+fn classify_cdp_error(error: String) -> String {
+    if error.starts_with("cdp_startup_rejected_fallback:")
+        || error.starts_with("cdp_unavailable_config_only:")
+    {
+        return error;
+    }
+    if error.contains("timed out waiting for CDP") {
+        return format!("cdp_unavailable_config_only: {error}");
+    }
+    error
 }
 
 fn validate_active_provider_for_injection(config: &AppConfig) -> Result<(), String> {
@@ -9297,6 +9712,58 @@ mod tests {
     }
 
     #[test]
+    fn legacy_macos_localization_cleanup_restores_signed_resource_shape() {
+        let root = std::env::temp_dir().join(format!("claude-plus-macos-cleanup-{}", Uuid::new_v4()));
+        let executable = root
+            .join("Claude.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("Claude");
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        fs::write(&executable, b"test").unwrap();
+        let install = ClaudeInstall {
+            executable: executable.clone(),
+            working_dir: executable.parent().unwrap().to_path_buf(),
+            source: "test",
+            app_user_model_id: None,
+        };
+        let resources = root
+            .join("Claude.app")
+            .join("Contents")
+            .join("Resources");
+        let frontend = resources.join("ion-dist").join("i18n");
+        let statsig = frontend.join("statsig");
+        let assets = resources.join("ion-dist").join("assets");
+        fs::create_dir_all(&statsig).unwrap();
+        fs::create_dir_all(&assets).unwrap();
+        fs::write(resources.join("zh-CN.json"), LOCALIZATION_DESKTOP_ZH_CN).unwrap();
+        fs::write(frontend.join("zh-CN.json"), LOCALIZATION_FRONTEND_ZH_CN).unwrap();
+        fs::write(statsig.join("zh-CN.json"), LOCALIZATION_STATSIG_ZH_CN).unwrap();
+        let with_zh = r#"["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt-BR","id-ID","zh-CN"]"#;
+        let base = r#"["en-US","de-DE","fr-FR","ko-KR","ja-JP","es-419","es-ES","it-IT","hi-IN","pt-BR","id-ID"]"#;
+        let asset = assets.join("index.js");
+        fs::write(&asset, format!("const locales={with_zh};")).unwrap();
+
+        assert_eq!(
+            macos_app_bundle_for_install(&install).as_deref(),
+            Some(root.join("Claude.app").as_path())
+        );
+        assert!(legacy_macos_localization_patch_detected(&resources));
+        let restored = remove_legacy_macos_localization_patch(&install).unwrap();
+
+        assert_eq!(restored.len(), 4);
+        assert!(!resources.join("zh-CN.json").exists());
+        assert!(!frontend.join("zh-CN.json").exists());
+        assert!(!statsig.join("zh-CN.json").exists());
+        assert_eq!(
+            fs::read_to_string(&asset).unwrap(),
+            format!("const locales={base};")
+        );
+        assert!(!legacy_macos_localization_patch_detected(&resources));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     #[ignore = "requires access to the Anthropic desktop download endpoint"]
     fn live_claude_desktop_release_resolves_a_versioned_download() {
         let (url, version) =
@@ -9370,6 +9837,23 @@ mod tests {
             injection_channel_label_for_launch(&install, false, true),
             "live_script_plus_direct_config"
         );
+        assert!(classify_cdp_error(
+            "timed out waiting for CDP version".to_string()
+        )
+        .starts_with("cdp_unavailable_config_only:"));
+    }
+
+    #[test]
+    fn macos_installer_downloads_only_trust_the_official_host() {
+        assert!(trusted_claude_desktop_download_url(
+            "https://downloads.claude.ai/releases/darwin/universal/1.2.3/Claude.dmg"
+        ));
+        assert!(!trusted_claude_desktop_download_url(
+            "https://downloads.claude.ai.example.com/Claude.dmg"
+        ));
+        assert!(!trusted_claude_desktop_download_url(
+            "http://downloads.claude.ai/Claude.dmg"
+        ));
     }
 
     #[cfg(target_os = "windows")]

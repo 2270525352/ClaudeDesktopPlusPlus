@@ -398,7 +398,7 @@
       injectLaunchVerified: "Claude Desktop 已启动，进程 {pid}，验证：{verdict}",
       cdpInjected: "实时能力脚本已启用，端口 {port}",
       cdpFailed: "实时能力脚本失败：{error}",
-      cdpFallback: "新版 Claude 拒绝 CDP 启动参数，已自动改用配置启动；3P 直连仍然有效",
+      cdpFallback: "实时脚本通道不可用，已自动改用配置启动；3P 直连仍然有效",
       cdpMsixUnavailable: "当前 MSIX 版 Claude Desktop 已改用 Claude-3p 配置方式",
       localizationTitle: "一键汉化",
       localizationStatus: "汉化状态",
@@ -407,11 +407,15 @@
       localizationEnabled: "已启用",
       localizationDisabled: "已停用",
       localizationResourcePatch: "资源补丁 / zh-CN",
+      localizationRuntimeSafe: "运行时脚本 / locale（不修改应用签名）",
+      localizationSignatureValid: "Claude.app 签名有效",
+      localizationSignatureInvalid: "Claude.app 签名异常",
+      localizationLegacyPatch: "检测到旧版 macOS 资源补丁",
       enableChineseLocalization: "一键启用汉化",
       disableChineseLocalization: "停用汉化",
-      localizationHint: "安装 zh-CN 语言资源并写入 Claude locale；Cowork 兼容模式，不修改 app.asar。",
-      localizationEnabledLog: "汉化资源补丁已安装；重启 Claude Desktop 后以 zh-CN 加载",
-      localizationDisabledLog: "汉化资源补丁已移除；语言已恢复 en-US",
+      localizationHint: "Windows 使用语言资源；macOS 使用运行时脚本与 locale，不修改已签名的 Claude.app。",
+      localizationEnabledLog: "汉化已启用；重启 Claude Desktop 后以 zh-CN 加载",
+      localizationDisabledLog: "汉化已停用；语言已恢复 en-US",
       launcherRouteExternalProcess: "进程启动",
       launcherRouteAppActivation: "系统应用激活",
       launcherRouteLocalizedSidecar: "本地汉化启动",
@@ -914,7 +918,7 @@
       injectLaunchVerified: "Claude Desktop started, process {pid}, verification: {verdict}",
       cdpInjected: "Live capability script enabled on port {port}",
       cdpFailed: "Live capability script failed: {error}",
-      cdpFallback: "This Claude version rejected CDP startup flags, so Claude++ automatically used configured startup; direct 3P routing remains active",
+      cdpFallback: "The live script channel is unavailable, so Claude++ automatically used configured startup; direct 3P routing remains active",
       cdpMsixUnavailable: "The current MSIX Claude Desktop uses Claude-3p config mode instead.",
       localizationTitle: "One-click Chinese UI",
       localizationStatus: "Localization Status",
@@ -923,11 +927,15 @@
       localizationEnabled: "Enabled",
       localizationDisabled: "Disabled",
       localizationResourcePatch: "Resource patch / zh-CN",
+      localizationRuntimeSafe: "Runtime script / locale (signed app unchanged)",
+      localizationSignatureValid: "Claude.app signature valid",
+      localizationSignatureInvalid: "Claude.app signature invalid",
+      localizationLegacyPatch: "Legacy macOS resource patch detected",
       enableChineseLocalization: "Enable Chinese UI",
       disableChineseLocalization: "Disable Chinese UI",
-      localizationHint: "Installs zh-CN language resources and writes Claude locale. Cowork-compatible mode; app.asar is not modified.",
-      localizationEnabledLog: "Chinese resource patch installed; restart Claude Desktop to load zh-CN",
-      localizationDisabledLog: "Chinese resource patch removed; locale restored to en-US",
+      localizationHint: "Windows uses language resources. macOS uses a runtime script and locale without modifying the signed Claude.app.",
+      localizationEnabledLog: "Chinese UI enabled; restart Claude Desktop to load zh-CN",
+      localizationDisabledLog: "Chinese UI disabled; locale restored to en-US",
       launcherRouteExternalProcess: "Process start",
       launcherRouteAppActivation: "System app activation",
       launcherRouteLocalizedSidecar: "Local localization start",
@@ -1331,6 +1339,7 @@
   let providerModelCatalog = [];
   let discoveredModelMappings = [];
   let providerModelPickerSnapshot = null;
+  let localizationPatchStatus = null;
   const providerTestResults = new Map();
   const terminal = document.getElementById("terminalWindow");
   const noticeBar = document.getElementById("noticeBar");
@@ -3512,7 +3521,9 @@
   }
 
   function isCdpStartupFallback(error) {
-    return String(error).includes("cdp_startup_rejected_fallback");
+    const value = String(error);
+    return value.includes("cdp_startup_rejected_fallback")
+      || value.includes("cdp_unavailable_config_only");
   }
 
   function renderProviderTest() {
@@ -3654,16 +3665,20 @@
   function renderLocalizationStatus() {
     const script = localizationScript();
     const badge = document.getElementById("localizationBadge");
-    const status = document.getElementById("localizationStatus");
+    const statusText = document.getElementById("localizationStatus");
     const runtime = document.getElementById("localizationRuntime");
-    if (!badge || !status || !runtime) return;
+    if (!badge || !statusText || !runtime) return;
 
     const label = script ? (script.enabled ? t("localizationEnabled") : t("localizationDisabled")) : t("localizationNotInstalled");
     badge.textContent = label;
     badge.classList.toggle("ok", Boolean(script?.enabled));
     badge.classList.toggle("warn", Boolean(script && !script.enabled));
-    status.textContent = label;
-    runtime.textContent = script?.enabled ? t("localizationResourcePatch") : liveInjectionLabel(lastLaunchResult, state?.install);
+    statusText.textContent = label;
+    runtime.textContent = script?.enabled
+      ? localizationPatchStatus?.strategy === "runtime_script_and_locale_config"
+        ? t("localizationRuntimeSafe")
+        : t("localizationResourcePatch")
+      : liveInjectionLabel(lastLaunchResult, state?.install);
     renderDoctorReport();
   }
 
@@ -3676,11 +3691,16 @@
       await runCommand(enabled ? "enable_chinese_localization" : "disable_chinese_localization", undefined, (result) => {
         state.config = result.config || state.config;
         const status = result.status || {};
+        localizationPatchStatus = status;
         const details = [
           result.message,
+          status.strategy === "runtime_script_and_locale_config" ? t("localizationRuntimeSafe") : "",
           status.resources_dir ? `resources: ${status.resources_dir}` : "",
           `desktop:${status.desktop_json ? "ok" : "-"} frontend:${status.frontend_json ? "ok" : "-"} statsig:${status.statsig_json ? "ok" : "-"} whitelist:${status.whitelist_patched ? "ok" : "-"}`,
           status.current_locale ? `locale: ${status.current_locale}` : "",
+          status.signature_valid === true ? t("localizationSignatureValid") : "",
+          status.signature_valid === false ? t("localizationSignatureInvalid") : "",
+          status.legacy_bundle_patch_detected ? t("localizationLegacyPatch") : "",
         ].filter(Boolean).join(" / ");
         renderState();
         log(result.ok ? "OK" : "ERR", details || (enabled ? t("localizationEnabledLog") : t("localizationDisabledLog")));
