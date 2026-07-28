@@ -4,9 +4,7 @@
   "version": "0.1.44",
   "identifier": "dev.claude-plus-plus.desktop",
   "build": {
-    "beforeDevCommand": "npm run serve:ui",
-    "beforeBuildCommand": "",
-    "devUrl": "http://127.0.0.1:5177",
+    "beforeBuildCommand": "npm run verify:production",
     "frontendDist": "../../../ui/cyber-console"
   },
   "app": {

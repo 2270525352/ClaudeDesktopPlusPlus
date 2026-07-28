@@ -8,7 +8,8 @@
     "build": "node ./scripts/tauri-run.mjs build --no-bundle",
     "bundle": "node ./scripts/tauri-run.mjs build",
     "tauri": "node ./scripts/tauri-run.mjs",
-    "serve:ui": "node ./scripts/serve-ui.mjs"
+    "serve:ui": "node ./scripts/serve-ui.mjs",
+    "verify:production": "node ./scripts/verify-production-config.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

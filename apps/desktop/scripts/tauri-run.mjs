@@ -14,6 +14,13 @@ if (!command) {
   process.exit(1);
 }
 
+if (command === "dev" && !hasConfigArg(args)) {
+  args.push(
+    "--config",
+    join(appRoot, "src-tauri", "tauri.dev.conf.json"),
+  );
+}
+
 if (process.platform === "win32") {
   env.RUSTUP_TOOLCHAIN ||= "stable-x86_64-pc-windows-gnullvm";
 
@@ -66,6 +73,10 @@ process.exit(exitCode);
 
 function hasTargetArg(values) {
   return values.some((value) => value === "--target" || value === "-t" || value.startsWith("--target="));
+}
+
+function hasConfigArg(values) {
+  return values.some((value) => value === "--config" || value === "-c" || value.startsWith("--config="));
 }
 
 function readTarget(values) {
