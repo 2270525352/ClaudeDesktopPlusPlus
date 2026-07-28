@@ -30,7 +30,7 @@ Move beyond limitations introduced by local Gateway forwarding with one-click di
 - Switch between direct and local Gateway modes with credential tests and model discovery.
 - Detect and launch Claude Desktop; check Modern Installer, VMP, and Hypervisor readiness.
 - Sync, search, and install plugins from the official Claude plugin directory.
-- Install or update the Built-in Broken Skills Pack with 17 Claude Code skills.
+- Install, update, or safely uninstall the Built-in Broken Skills Pack with 17 Claude Code skills.
 - Apply Chinese localization and recover local conversations after account or provider changes.
 - Chinese and English UI, system tray support, silent command execution, and update checks.
 

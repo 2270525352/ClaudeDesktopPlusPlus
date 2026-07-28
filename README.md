@@ -30,7 +30,7 @@ ClaudeDesktopPlusPlus（Claude++）是面向 Claude Desktop 的第三方桌面�
 - 在直连与本地 Gateway 之间切换，支持凭据测试和模型发现。
 - 检测并启动 Claude Desktop，检查 Modern Installer、VMP 与 Hypervisor。
 - 同步、搜索并安装 Claude 官方插件目录。
-- 一键安装或更新内置broken技能包，包含 17 个 Claude Code 技能。
+- 可随时安装、更新或安全卸载内置broken技能包，包含 17 个 Claude Code 技能。
 - 一键汉化 Claude Desktop，一键修复切换账号或渠道后丢失的本地历史对话。
 - 中英文界面、系统托盘、静默命令执行和应用版本检查。
 

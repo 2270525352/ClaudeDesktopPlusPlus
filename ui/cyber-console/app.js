@@ -137,6 +137,7 @@
       builtinSkillsTitle: "内置broken技能包",
       builtinSkillsInstall: "一键安装技能包",
       builtinSkillsUpdate: "更新技能包",
+      builtinSkillsUninstall: "卸载技能包",
       builtinSkillsRefresh: "刷新状态",
       builtinSkillsPackVersion: "内置版本",
       builtinSkillsStatus: "安装状态",
@@ -148,9 +149,14 @@
       builtinSkillsInstalling: "正在安装内置broken技能包...",
       builtinSkillsInstallOk: "内置broken技能包安装完成：{count} 个技能",
       builtinSkillsInstallFailed: "内置broken技能包安装失败：{error}",
-      builtinSkillsHint: "安装到 ~/.claude/skills；同名技能会先备份，安装过程不会执行包内脚本。首次安装后请重启 Claude Code。",
+      builtinSkillsUninstalling: "正在卸载内置broken技能包...",
+      builtinSkillsUninstallOk: "内置broken技能包已卸载：移除 {removed} 个技能，恢复 {restored} 个原技能",
+      builtinSkillsUninstallFailed: "内置broken技能包卸载失败：{error}",
+      builtinSkillsUninstallConfirm: "卸载内置broken技能包？当前技能会先备份，安装前存在的同名技能将自动恢复。",
+      builtinSkillsHint: "可随时安装、更新或卸载；同名技能和卸载内容都会先备份，操作过程不会执行包内脚本。",
       builtinSkillsInstalledCount: "{installed} / {total}",
       builtinSkillsBackup: "原技能备份：{path}",
+      builtinSkillsUninstallBackup: "卸载内容备份：{path}",
       officialPluginsTitle: "官方插件市场",
       officialPluginsSync: "同步官方目录",
       officialPluginsInstall: "安装",
@@ -617,6 +623,7 @@
       builtinSkillsTitle: "Built-in Broken Skills Pack",
       builtinSkillsInstall: "Install Skills Pack",
       builtinSkillsUpdate: "Update Skills Pack",
+      builtinSkillsUninstall: "Uninstall Skills Pack",
       builtinSkillsRefresh: "Refresh Status",
       builtinSkillsPackVersion: "Pack Version",
       builtinSkillsStatus: "Install Status",
@@ -628,9 +635,14 @@
       builtinSkillsInstalling: "Installing the Built-in Broken Skills Pack...",
       builtinSkillsInstallOk: "Built-in Broken Skills Pack installed: {count}",
       builtinSkillsInstallFailed: "Built-in Broken Skills Pack installation failed: {error}",
-      builtinSkillsHint: "Installs to ~/.claude/skills. Existing skills with the same names are backed up first, package scripts are not executed during installation, and Claude Code should be restarted after the first install.",
+      builtinSkillsUninstalling: "Uninstalling the Built-in Broken Skills Pack...",
+      builtinSkillsUninstallOk: "Built-in Broken Skills Pack uninstalled: removed {removed}, restored {restored} previous skills",
+      builtinSkillsUninstallFailed: "Built-in Broken Skills Pack uninstall failed: {error}",
+      builtinSkillsUninstallConfirm: "Uninstall the Built-in Broken Skills Pack? Current skills will be backed up and previous skills with the same names will be restored.",
+      builtinSkillsHint: "Install, update, or uninstall at any time. Conflicting and removed skills are backed up first, and package scripts are never executed.",
       builtinSkillsInstalledCount: "{installed} / {total}",
       builtinSkillsBackup: "Previous skills backup: {path}",
+      builtinSkillsUninstallBackup: "Uninstalled skills backup: {path}",
       officialPluginsTitle: "Official Plugin Marketplace",
       officialPluginsSync: "Sync Official Directory",
       officialPluginsInstall: "Install",
@@ -1705,6 +1717,36 @@
     }
   }
 
+  async function uninstallBuiltinSkills() {
+    if (builtinSkillsLoading || !builtinSkillsStatus?.managed) return;
+    if (!window.confirm(t("builtinSkillsUninstallConfirm"))) return;
+    builtinSkillsLoading = true;
+    renderBuiltinSkills();
+    showNotice("WARN", t("builtinSkillsUninstalling"));
+    try {
+      await nextFrame();
+      const result = await invoke("uninstall_builtin_skills");
+      if (!result) return;
+      builtinSkillsStatus = result.status;
+      renderBuiltinSkills();
+      renderBuiltinSkillsLog(result, "uninstall");
+      log(
+        result.ok ? "OK" : "ERR",
+        result.ok
+          ? t("builtinSkillsUninstallOk", {
+              removed: result.removed_count || 0,
+              restored: result.restored_count || 0,
+            })
+          : t("builtinSkillsUninstallFailed", { error: result.message })
+      );
+    } catch (error) {
+      log("ERR", t("builtinSkillsUninstallFailed", { error: String(error) }));
+    } finally {
+      builtinSkillsLoading = false;
+      renderBuiltinSkills();
+    }
+  }
+
   async function refreshOfficialPlugins() {
     if (officialPluginsLoading) return;
     officialPluginsLoading = true;
@@ -2277,6 +2319,10 @@
         ? t("builtinSkillsUpdate")
         : t("builtinSkillsInstall");
     }
+    const uninstallButton = document.getElementById("builtinSkillsUninstallButton");
+    if (uninstallButton) {
+      uninstallButton.disabled = builtinSkillsLoading || !status?.managed;
+    }
 
     const list = document.getElementById("builtinSkillsList");
     if (!list) return;
@@ -2298,13 +2344,20 @@
     });
   }
 
-  function renderBuiltinSkillsLog(result) {
+  function renderBuiltinSkillsLog(result, action = "install") {
     const logBox = document.getElementById("builtinSkillsActionLog");
     if (!logBox) return;
     logBox.replaceChildren();
     const lines = [
       result.message,
-      result.backup_path ? t("builtinSkillsBackup", { path: result.backup_path }) : "",
+      result.backup_path
+        ? t(
+            action === "uninstall"
+              ? "builtinSkillsUninstallBackup"
+              : "builtinSkillsBackup",
+            { path: result.backup_path }
+          )
+        : "",
     ].filter(Boolean);
     lines.forEach((line) => {
       const item = document.createElement("p");
@@ -3708,6 +3761,10 @@
     }
     if (action === "installBuiltinSkills") {
       await installBuiltinSkills();
+      return;
+    }
+    if (action === "uninstallBuiltinSkills") {
+      await uninstallBuiltinSkills();
       return;
     }
     if (action === "enableDeveloperCapabilities") {

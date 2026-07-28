@@ -295,6 +295,7 @@ struct BuiltinSkillsStatus {
     installed_version: Option<String>,
     packaged_count: usize,
     installed_count: usize,
+    managed: bool,
     installed: bool,
     update_available: bool,
     install_path: String,
@@ -310,11 +311,29 @@ struct BuiltinSkillsInstallResult {
     status: BuiltinSkillsStatus,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
+struct BuiltinSkillsUninstallResult {
+    ok: bool,
+    removed_count: usize,
+    restored_count: usize,
+    backup_path: Option<String>,
+    message: String,
+    status: BuiltinSkillsStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct BuiltinSkillsMarker {
     version: String,
     installed_at_ms: u128,
     skills: Vec<String>,
+    #[serde(default)]
+    backups: Vec<BuiltinSkillBackup>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BuiltinSkillBackup {
+    name: String,
+    path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -924,6 +943,13 @@ async fn builtin_skills_status() -> Result<BuiltinSkillsStatus, String> {
 #[tauri::command]
 async fn install_builtin_skills() -> Result<BuiltinSkillsInstallResult, String> {
     tauri::async_runtime::spawn_blocking(install_builtin_skills_sync)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn uninstall_builtin_skills() -> Result<BuiltinSkillsUninstallResult, String> {
+    tauri::async_runtime::spawn_blocking(uninstall_builtin_skills_sync)
         .await
         .map_err(|error| error.to_string())?
 }
@@ -6451,17 +6477,24 @@ fn builtin_skills_status_sync() -> Result<BuiltinSkillsStatus, String> {
     let marker = read_json_file(&builtin_skills_marker_path())
         .ok()
         .and_then(|value| serde_json::from_value::<BuiltinSkillsMarker>(value).ok());
+    let managed_names = marker
+        .as_ref()
+        .map(|marker| marker.skills.iter().cloned().collect::<HashSet<_>>())
+        .unwrap_or_default();
     let installed_version = marker.as_ref().map(|marker| marker.version.clone());
     let skills = names
         .iter()
         .map(|name| BuiltinSkillEntry {
             name: name.clone(),
-            installed: install_root.join(name).join("SKILL.md").is_file(),
+            installed: managed_names.contains(name)
+                && install_root.join(name).join("SKILL.md").is_file(),
         })
         .collect::<Vec<_>>();
     let installed_count = skills.iter().filter(|skill| skill.installed).count();
     let all_present = installed_count == names.len();
-    let installed = all_present
+    let managed = marker.is_some();
+    let installed = managed
+        && all_present
         && installed_version
             .as_deref()
             .is_some_and(|version| version == BUILTIN_SKILLS_VERSION);
@@ -6471,8 +6504,9 @@ fn builtin_skills_status_sync() -> Result<BuiltinSkillsStatus, String> {
         installed_version,
         packaged_count: names.len(),
         installed_count,
+        managed,
         installed,
-        update_available: installed_count > 0 && !installed,
+        update_available: managed && !installed,
         install_path: path_string(&install_root),
         skills,
     })
@@ -6481,6 +6515,15 @@ fn builtin_skills_status_sync() -> Result<BuiltinSkillsStatus, String> {
 fn install_builtin_skills_sync() -> Result<BuiltinSkillsInstallResult, String> {
     let names = builtin_skill_names()?;
     let name_set = names.iter().cloned().collect::<HashSet<_>>();
+    let previous_marker = read_builtin_skills_marker().ok();
+    let previously_managed = previous_marker
+        .as_ref()
+        .map(|marker| marker.skills.iter().cloned().collect::<HashSet<_>>())
+        .unwrap_or_default();
+    let mut original_backups = previous_marker
+        .as_ref()
+        .map(|marker| marker.backups.clone())
+        .unwrap_or_default();
     let app_data = config_path()
         .parent()
         .map(Path::to_path_buf)
@@ -6529,6 +6572,13 @@ fn install_builtin_skills_sync() -> Result<BuiltinSkillsInstallResult, String> {
                 return Err(format!("Failed to back up skill {name}: {error}"));
             }
             backed_up.push(name.clone());
+            if !previously_managed.contains(name) {
+                original_backups.retain(|item| item.name != *name);
+                original_backups.push(BuiltinSkillBackup {
+                    name: name.clone(),
+                    path: path_string(&backup),
+                });
+            }
         }
         if let Err(error) = fs::rename(&staged, &target) {
             if backup.exists() {
@@ -6551,11 +6601,23 @@ fn install_builtin_skills_sync() -> Result<BuiltinSkillsInstallResult, String> {
         version: BUILTIN_SKILLS_VERSION.to_string(),
         installed_at_ms: unix_millis(),
         skills: names,
+        backups: original_backups,
     };
-    write_json_file(
+    if let Err(error) = write_json_file(
         &builtin_skills_marker_path(),
         &serde_json::to_value(marker).map_err(|error| error.to_string())?,
-    )?;
+    ) {
+        rollback_builtin_skills(
+            &install_root,
+            &backup_root,
+            &installed_names,
+            &backed_up,
+        );
+        let _ = fs::remove_dir_all(&staging_root);
+        return Err(format!(
+            "Failed to write the built-in skills ownership marker: {error}"
+        ));
+    }
     let _ = fs::remove_dir_all(&staging_root);
     if staging_parent
         .read_dir()
@@ -6575,6 +6637,199 @@ fn install_builtin_skills_sync() -> Result<BuiltinSkillsInstallResult, String> {
         ),
         status: builtin_skills_status_sync()?,
     })
+}
+
+fn uninstall_builtin_skills_sync() -> Result<BuiltinSkillsUninstallResult, String> {
+    let marker_path = builtin_skills_marker_path();
+    let marker = read_builtin_skills_marker()?;
+    let mut managed_names = marker
+        .skills
+        .iter()
+        .filter(|name| validate_builtin_skill_name(name))
+        .cloned()
+        .collect::<Vec<_>>();
+    managed_names.sort();
+    managed_names.dedup();
+    if managed_names.is_empty() {
+        return Err("The built-in skills ownership marker is empty".to_string());
+    }
+    let managed_name_set = managed_names.iter().cloned().collect::<HashSet<_>>();
+
+    let install_root = claude_skills_root();
+    let app_data = config_path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let uninstall_parent = app_data.join("skill-uninstall-backups");
+    let uninstall_backup_root =
+        uninstall_parent.join(format!("builtin-{}", unix_millis()));
+    let validated_backups = marker
+        .backups
+        .iter()
+        .filter(|backup| managed_name_set.contains(&backup.name))
+        .map(|backup| {
+            validate_builtin_skill_backup(&app_data, backup)
+                .map(|path| (backup.name.clone(), path))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut removed_names = Vec::new();
+    for name in &managed_names {
+        let target = install_root.join(name);
+        if !target.exists() {
+            continue;
+        }
+        let backup = uninstall_backup_root.join(name);
+        fs::create_dir_all(&uninstall_backup_root).map_err(|error| error.to_string())?;
+        if let Err(error) = fs::rename(&target, &backup) {
+            rollback_builtin_skills_uninstall(
+                &install_root,
+                &uninstall_backup_root,
+                &removed_names,
+                &[],
+            );
+            return Err(format!("Failed to remove built-in skill {name}: {error}"));
+        }
+        removed_names.push(name.clone());
+    }
+
+    let mut restored_backups = Vec::new();
+    for (name, backup) in validated_backups {
+        if !backup.exists() {
+            continue;
+        }
+        let target = install_root.join(&name);
+        if target.exists() {
+            rollback_builtin_skills_uninstall(
+                &install_root,
+                &uninstall_backup_root,
+                &removed_names,
+                &restored_backups,
+            );
+            return Err(format!(
+                "Cannot restore the previous skill because the target already exists: {name}"
+            ));
+        }
+        if let Some(parent) = target.parent() {
+            if let Err(error) = fs::create_dir_all(parent) {
+                rollback_builtin_skills_uninstall(
+                    &install_root,
+                    &uninstall_backup_root,
+                    &removed_names,
+                    &restored_backups,
+                );
+                return Err(format!(
+                    "Failed to prepare the previous skill restore directory for {name}: {error}"
+                ));
+            }
+        }
+        if let Err(error) = fs::rename(&backup, &target) {
+            rollback_builtin_skills_uninstall(
+                &install_root,
+                &uninstall_backup_root,
+                &removed_names,
+                &restored_backups,
+            );
+            return Err(format!("Failed to restore previous skill {name}: {error}"));
+        }
+        restored_backups.push((name, backup));
+    }
+
+    if let Err(error) = fs::remove_file(&marker_path) {
+        rollback_builtin_skills_uninstall(
+            &install_root,
+            &uninstall_backup_root,
+            &removed_names,
+            &restored_backups,
+        );
+        return Err(format!(
+            "Failed to remove the built-in skills ownership marker: {error}"
+        ));
+    }
+
+    if uninstall_backup_root
+        .read_dir()
+        .is_ok_and(|mut entries| entries.next().is_none())
+    {
+        let _ = fs::remove_dir(&uninstall_backup_root);
+    }
+    if uninstall_parent
+        .read_dir()
+        .is_ok_and(|mut entries| entries.next().is_none())
+    {
+        let _ = fs::remove_dir(&uninstall_parent);
+    }
+
+    let backup_path =
+        uninstall_backup_root
+            .exists()
+            .then(|| path_string(&uninstall_backup_root));
+    Ok(BuiltinSkillsUninstallResult {
+        ok: true,
+        removed_count: removed_names.len(),
+        restored_count: restored_backups.len(),
+        backup_path,
+        message: format!(
+            "{} built-in Claude skills uninstalled; {} previous skills restored.",
+            removed_names.len(),
+            restored_backups.len()
+        ),
+        status: builtin_skills_status_sync()?,
+    })
+}
+
+fn read_builtin_skills_marker() -> Result<BuiltinSkillsMarker, String> {
+    let path = builtin_skills_marker_path();
+    if !path.is_file() {
+        return Err("The built-in skills pack is not installed by Claude++".to_string());
+    }
+    let value = read_json_file(&path).map_err(|error| error.to_string())?;
+    serde_json::from_value(value).map_err(|error| error.to_string())
+}
+
+fn validate_builtin_skill_backup(
+    app_data: &Path,
+    backup: &BuiltinSkillBackup,
+) -> Result<PathBuf, String> {
+    if !validate_builtin_skill_name(&backup.name) {
+        return Err(format!("Invalid built-in skill backup name: {}", backup.name));
+    }
+    let path = PathBuf::from(&backup.path);
+    let allowed_root = app_data.join("skill-backups");
+    if !path.is_absolute()
+        || !path.starts_with(&allowed_root)
+        || path.file_name().and_then(|name| name.to_str()) != Some(backup.name.as_str())
+    {
+        return Err(format!(
+            "Unsafe built-in skill backup path for {}",
+            backup.name
+        ));
+    }
+    Ok(path)
+}
+
+fn rollback_builtin_skills_uninstall(
+    install_root: &Path,
+    uninstall_backup_root: &Path,
+    removed_names: &[String],
+    restored_backups: &[(String, PathBuf)],
+) {
+    for (name, original_backup) in restored_backups.iter().rev() {
+        let target = install_root.join(name);
+        if target.exists() && !original_backup.exists() {
+            if let Some(parent) = original_backup.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let _ = fs::rename(&target, original_backup);
+        }
+    }
+    for name in removed_names.iter().rev() {
+        let backup = uninstall_backup_root.join(name);
+        let target = install_root.join(name);
+        if backup.exists() && !target.exists() {
+            let _ = fs::rename(&backup, &target);
+        }
+    }
 }
 
 fn builtin_skill_names() -> Result<Vec<String>, String> {
@@ -7510,6 +7765,7 @@ fn main() {
             system_readiness_status,
             test_active_provider,
             test_provider,
+            uninstall_builtin_skills,
             update_status,
             upgrade_claude_desktop,
             upgrade_claude_plus
@@ -7699,6 +7955,44 @@ fn run_headless_command() -> bool {
             }
         }
     }
+    if args
+        .iter()
+        .any(|arg| arg == "--claude-plus-install-builtin-skills")
+    {
+        match install_builtin_skills_sync() {
+            Ok(result) => {
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => println!("{json}"),
+                    Err(error) => eprintln!("Failed to encode built-in skills result: {error}"),
+                }
+                let _ = std::io::stdout().flush();
+                return true;
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
+    if args
+        .iter()
+        .any(|arg| arg == "--claude-plus-uninstall-builtin-skills")
+    {
+        match uninstall_builtin_skills_sync() {
+            Ok(result) => {
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => println!("{json}"),
+                    Err(error) => eprintln!("Failed to encode built-in skills result: {error}"),
+                }
+                let _ = std::io::stdout().flush();
+                return true;
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if !args.iter().any(|arg| arg == "--claude-plus-inject-current") {
         return false;
     }
@@ -7727,6 +8021,49 @@ fn run_headless_command() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_builtin_skills_marker_defaults_to_no_backups() {
+        let marker = serde_json::from_value::<BuiltinSkillsMarker>(json!({
+            "version": "legacy",
+            "installed_at_ms": 1,
+            "skills": ["browser-automation"]
+        }))
+        .expect("legacy marker should remain readable");
+
+        assert!(marker.backups.is_empty());
+    }
+
+    #[test]
+    fn builtin_skill_backup_path_must_stay_in_managed_root() {
+        let app_data = if cfg!(target_os = "windows") {
+            PathBuf::from("C:\\Users\\tester\\AppData\\Roaming\\Claude++")
+        } else {
+            PathBuf::from("/tmp/claude-plus-test")
+        };
+        let valid = BuiltinSkillBackup {
+            name: "browser-automation".to_string(),
+            path: path_string(
+                &app_data
+                    .join("skill-backups")
+                    .join("builtin-1")
+                    .join("browser-automation"),
+            ),
+        };
+        let invalid = BuiltinSkillBackup {
+            name: "browser-automation".to_string(),
+            path: path_string(
+                &app_data
+                    .parent()
+                    .unwrap_or(Path::new("/"))
+                    .join("outside")
+                    .join("browser-automation"),
+            ),
+        };
+
+        assert!(validate_builtin_skill_backup(&app_data, &valid).is_ok());
+        assert!(validate_builtin_skill_backup(&app_data, &invalid).is_err());
+    }
 
     #[test]
     fn cdp_fallback_reports_config_injection_channel() {
