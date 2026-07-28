@@ -57,6 +57,7 @@
       updateAvailable: "发现新版本",
       updateInstallReady: "可安装",
       updateReady: "已是最新",
+      updateFailed: "检查失败",
       updateUnknown: "未检查",
       updateChecking: "正在检查更新...",
       updateActionRunning: "正在下载并启动安装器...",
@@ -545,6 +546,7 @@
       updateAvailable: "Update available",
       updateInstallReady: "Ready to install",
       updateReady: "Up to date",
+      updateFailed: "Check failed",
       updateUnknown: "Not checked",
       updateChecking: "Checking updates...",
       updateActionRunning: "Downloading and opening installer...",
@@ -1509,6 +1511,9 @@
     document.getElementById("bridgeState").textContent = t("bridgeConnected");
     renderState();
     hydrateLazyPage(currentPage());
+    if (!updateStatus && !updateLoading) {
+      refreshUpdateStatus();
+    }
     if (!silent) log("OK", t("refreshDone"));
   }
 
@@ -2206,6 +2211,12 @@
     if (loading) {
       badge.textContent = t("updateChecking");
       badge.classList.add("warn");
+      return;
+    }
+    if (check?.check_failed) {
+      badge.textContent = t("updateFailed");
+      badge.classList.add("err");
+      badge.title = check.message || "";
       return;
     }
     if (!check || !check.message || !check.latest_version) {

@@ -379,6 +379,7 @@ struct VersionCheck {
     current_version: Option<String>,
     latest_version: Option<String>,
     update_available: bool,
+    check_failed: bool,
     download_url: Option<String>,
     release_url: Option<String>,
     asset_name: Option<String>,
@@ -1257,6 +1258,7 @@ fn check_claude_desktop_update() -> VersionCheck {
                 current_version,
                 latest_version,
                 update_available,
+                check_failed: false,
                 download_url: Some(download_url),
                 release_url: Some("https://claude.ai/download".to_string()),
                 asset_name: Some(claude_desktop_latest_asset_name().to_string()),
@@ -1267,6 +1269,7 @@ fn check_claude_desktop_update() -> VersionCheck {
             current_version,
             latest_version: None,
             update_available: false,
+            check_failed: true,
             download_url: None,
             release_url: Some("https://claude.ai/download".to_string()),
             asset_name: None,
@@ -1287,6 +1290,7 @@ fn check_claude_plus_update() -> VersionCheck {
                 current_version,
                 latest_version,
                 update_available,
+                check_failed: false,
                 download_url: asset
                     .as_ref()
                     .map(|asset| asset.browser_download_url.clone()),
@@ -1303,6 +1307,7 @@ fn check_claude_plus_update() -> VersionCheck {
             current_version,
             latest_version: None,
             update_available: false,
+            check_failed: true,
             download_url: None,
             release_url: Some(CLAUDE_PLUS_GITHUB_RELEASES_URL.to_string()),
             asset_name: None,
@@ -1322,6 +1327,15 @@ fn resolve_claude_desktop_latest_download() -> Result<(String, Option<String>), 
         .set("User-Agent", "ClaudeDesktopPlusPlus")
         .call()
     {
+        Ok(response) if (300..400).contains(&response.status()) => response
+            .header("location")
+            .map(ToString::to_string)
+            .ok_or_else(|| {
+                format!(
+                    "redirect returned HTTP {} without Location header",
+                    response.status()
+                )
+            })?,
         Ok(response) => response.get_url().to_string(),
         Err(ureq::Error::Status(status, response)) if (300..400).contains(&status) => response
             .header("location")
@@ -8165,6 +8179,25 @@ fn run_headless_command() -> bool {
             }
         }
     }
+    if args
+        .iter()
+        .any(|arg| arg == "--claude-plus-check-updates")
+    {
+        match update_status_sync() {
+            Ok(result) => {
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => println!("{json}"),
+                    Err(error) => eprintln!("Failed to encode update status: {error}"),
+                }
+                let _ = std::io::stdout().flush();
+                return true;
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if !args.iter().any(|arg| arg == "--claude-plus-inject-current") {
         return false;
     }
@@ -8219,6 +8252,16 @@ mod tests {
         );
         assert!(is_version_newer("1.24012.10", "1.24012.9"));
         assert!(!is_version_newer("1.24012.9", "1.24012.9"));
+    }
+
+    #[test]
+    #[ignore = "requires access to the Anthropic desktop download endpoint"]
+    fn live_claude_desktop_release_resolves_a_versioned_download() {
+        let (url, version) =
+            resolve_claude_desktop_latest_download().expect("latest download should resolve");
+
+        assert!(url.contains("downloads.claude.ai/releases/"));
+        assert!(version.as_deref().is_some_and(is_version_like));
     }
 
     #[test]

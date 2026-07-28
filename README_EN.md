@@ -70,6 +70,7 @@ After installing `Claude++`:
 - The Windows uninstaller removes 3P routing written by Claude++; the same repair is available from **API Config**.
 - `v0.1.46` adds code signing and DMG signature verification for both macOS ARM64 and Intel x64 builds, fixing the damaged-app warning caused by unsigned downloads.
 - `v0.1.47` uses concise installer names and adds automatic Claude Desktop version checks plus one-click install/update on Windows and macOS.
+- `v0.1.48` fixes latest-version redirect parsing, checks for updates automatically at startup, and surfaces update-check failures in the version card.
 
 ## Development
 
