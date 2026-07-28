@@ -483,7 +483,7 @@
       recommendationBase: "Base URL",
       recommendationProtocol: "协议",
       recommendationDirectReady: "适合直连",
-      recommendationNeedsAdapter: "需要适配网关",
+      recommendationNeedsAdapter: "需上游映射",
       recommendationFilled: "已填入 {provider}，补上 API Key 后保存即可",
       recommendationSaved: "{provider} 已保存为当前配置",
       modeOfficialTitle: "官方账号模式",
@@ -985,7 +985,7 @@
       recommendationBase: "Base URL",
       recommendationProtocol: "Protocol",
       recommendationDirectReady: "Direct ready",
-      recommendationNeedsAdapter: "Adapter needed",
+      recommendationNeedsAdapter: "Upstream mapping required",
       recommendationFilled: "{provider} filled. Add your API key, then save.",
       recommendationSaved: "{provider} saved as the active config",
       modeOfficialTitle: "Official Account Mode",
@@ -1083,8 +1083,8 @@
       protocol: "OpenAI-compatible",
       directReady: false,
       note: {
-        zh: "适合 Kimi 模型；保存后自动使用本地转换网关。",
-        en: "For Kimi models. Saving uses the local protocol adapter Gateway automatically.",
+        zh: "适合 Kimi 模型；默认按直连保存，上游未提供 Claude 协议映射时再切换 Gateway。",
+        en: "For Kimi models. Saves in direct mode by default; use Gateway only when upstream Claude routing is unavailable.",
       },
     },
     {
@@ -1094,8 +1094,8 @@
       protocol: "OpenAI-compatible",
       directReady: false,
       note: {
-        zh: "适合 OpenAI/Codex 类模型；保存后自动使用本地转换网关。",
-        en: "For OpenAI/Codex-style models. Saving uses the local protocol adapter Gateway automatically.",
+        zh: "适合 OpenAI/Codex 类模型；默认按直连保存，上游未提供 Claude 协议映射时再切换 Gateway。",
+        en: "For OpenAI/Codex-style models. Saves in direct mode by default; use Gateway only when upstream Claude routing is unavailable.",
       },
     },
     {
@@ -1105,8 +1105,8 @@
       protocol: "OpenAI-compatible",
       directReady: false,
       note: {
-        zh: "适合通过硅基流动接入 DeepSeek、Qwen、GLM 等模型；保存后自动使用本地转换网关。",
-        en: "For SiliconFlow-hosted DeepSeek, Qwen, GLM, and other models. Saving uses the local protocol adapter Gateway automatically.",
+        zh: "适合通过硅基流动接入 DeepSeek、Qwen、GLM 等模型；默认直连，协议不兼容时再切换 Gateway。",
+        en: "For SiliconFlow-hosted DeepSeek, Qwen, GLM, and other models. Direct mode is the default; use Gateway only for protocol compatibility.",
       },
     },
   ];
@@ -1940,7 +1940,7 @@
     const ccSwitch = state.cc_switch;
     const activeProvider = config.providers.find((provider) => provider.active);
 
-    renderConnectionMode(config.gateway || { enabled: true, port: 49331 });
+    renderConnectionMode(config.gateway || { enabled: false, port: 49331 });
     renderGatewayStatus();
     renderDoctorReport();
     renderVerification();
@@ -1966,7 +1966,7 @@
     document.getElementById("ccSwitchProviders").textContent = String(ccSwitch?.provider_count || 0);
 
     hydrateSandboxForm(config.sandbox);
-    hydrateGatewayForm(config.gateway || { enabled: true, port: 49331 });
+    hydrateGatewayForm(config.gateway || { enabled: false, port: 49331 });
   }
 
   function featureEnabled(value) {
@@ -2006,7 +2006,7 @@
 
   function doctorItems() {
     const config = state?.config || {};
-    const gateway = config.gateway || { enabled: true, port: 49331 };
+    const gateway = config.gateway || { enabled: false, port: 49331 };
     const activeProvider = config.providers?.find((provider) => provider.active);
     const system = state?.system || {};
     const script = localizationScript();
@@ -2074,16 +2074,13 @@
     };
     if (activeProvider) {
       const gatewayMode = gateway.enabled ? "Gateway" : t("directModeButton");
-      const openAiDirect = activeProvider.protocol === "openai" && !gateway.enabled;
       const injectable = canInjectProvider(activeProvider, config.sandbox || {});
       const summary = !injectable
         ? t("doctorApiNeedsConfig")
-        : openAiDirect
-          ? t("doctorApiOpenAIDirectWarning")
-          : t("doctorApiReady");
+        : t("doctorApiReady");
       apiItem = {
         ...apiItem,
-        level: injectable && !openAiDirect ? "ok" : "warn",
+        level: injectable ? "ok" : "warn",
         summary: `${activeProvider.name} / ${summary}`,
         meta: t("doctorApiMeta", {
           protocol: providerProtocolLabel(activeProvider.protocol),
@@ -3149,7 +3146,7 @@
 
   function renderGatewayStatus() {
     const gateway = state.gateway;
-    const configGateway = state.config.gateway || { enabled: true, port: 49331 };
+    const configGateway = state.config.gateway || { enabled: false, port: 49331 };
     const gatewayEffective = Boolean(gateway?.enabled ?? configGateway.enabled);
     const fallbackUrl = `http://127.0.0.1:${configGateway.port || 49331}`;
     const url = gateway?.url || fallbackUrl;

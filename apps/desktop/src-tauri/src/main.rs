@@ -846,7 +846,7 @@ impl Default for SandboxConfig {
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             port: DEFAULT_GATEWAY_PORT,
         }
     }
@@ -3559,7 +3559,7 @@ fn test_api_provider(provider: &ApiProvider) -> Result<ProviderTestResult, Strin
         "Provider did not return a successful model list response".to_string()
     } else if requires_adapter {
         format!(
-            "Detected {model_count} OpenAI/Codex-style model(s). Claude++ will use the local adapter Gateway for Claude Desktop."
+            "Detected {model_count} OpenAI/Codex-style model(s). Direct mode is preferred when the upstream provides Claude-compatible model routing; use Gateway only as a protocol adapter fallback."
         )
     } else if model_count == 0 {
         "Model endpoint is reachable but returned no model IDs; configure explicit models or check provider permissions."
@@ -8758,6 +8758,12 @@ fn run_headless_command() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gateway_defaults_to_direct_mode() {
+        assert!(!GatewayConfig::default().enabled);
+        assert!(!AppConfig::default().gateway.enabled);
+    }
 
     #[test]
     fn claude_version_helpers_cover_release_and_install_paths() {
