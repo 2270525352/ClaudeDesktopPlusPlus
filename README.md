@@ -15,7 +15,7 @@
   <img alt="Rust" src="https://img.shields.io/badge/Rust-1.85%2B-orange">
   <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.x-24C8DB">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-x64-0078D4">
-  <img alt="macOS" src="https://img.shields.io/badge/macOS-arm64-111111">
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-x64%20%7C%20arm64-111111">
 </p>
 
 ClaudeDesktopPlusPlus（Claude++）是面向 Claude Desktop 的第三方桌面增强工具。它把启动、第三方 API、`cc-switch`、插件、汉化、历史修复和系统检查集中到一个控制台中。
@@ -51,7 +51,7 @@ ClaudeDesktopPlusPlus（Claude++）是面向 Claude Desktop 的第三方桌面�
 
 - Windows x64：`ClaudeDesktopPlusPlus-*-windows-x64-setup.exe`
 - macOS Apple Silicon：`ClaudeDesktopPlusPlus-*-macos-arm64-*.dmg`
-- macOS Intel：暂未发布
+- macOS Intel：`ClaudeDesktopPlusPlus-*-macos-x64-*.dmg`
 
 安装后启动 `Claude++`，建议依次完成：
 
@@ -69,6 +69,7 @@ ClaudeDesktopPlusPlus（Claude++）是面向 Claude Desktop 的第三方桌面�
 - 历史修复会先备份当前目标数据，默认不会复制登录凭据。
 - Windows 卸载程序会自动移除 Claude++ 写入的 3P 路由；也可在「API 配置」中手动恢复 Claude 官方配置。
 - 本次兼容性与卸载恢复改动见 [v0.1.44 修复说明](docs/releases/v0.1.44-fixes.md)。
+- `v0.1.45` 的发布内容见 [v0.1.45 发布说明](docs/releases/v0.1.45.md)。
 
 ## 开发
 

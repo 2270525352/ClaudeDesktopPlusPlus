@@ -15,7 +15,7 @@
   <img alt="Rust" src="https://img.shields.io/badge/Rust-1.85%2B-orange">
   <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.x-24C8DB">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-x64-0078D4">
-  <img alt="macOS" src="https://img.shields.io/badge/macOS-arm64-111111">
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-x64%20%7C%20arm64-111111">
 </p>
 
 ClaudeDesktopPlusPlus (Claude++) is a third-party desktop companion for Claude Desktop. It brings launching, API providers, `cc-switch`, plugins, localization, conversation recovery, and system diagnostics into one control console.
@@ -51,7 +51,7 @@ Get the latest build from [GitHub Releases](https://github.com/2270525352/Claude
 
 - Windows x64: `ClaudeDesktopPlusPlus-*-windows-x64-setup.exe`
 - macOS Apple Silicon: `ClaudeDesktopPlusPlus-*-macos-arm64-*.dmg`
-- macOS Intel: not published yet
+- macOS Intel: `ClaudeDesktopPlusPlus-*-macos-x64-*.dmg`
 
 After installing `Claude++`:
 
