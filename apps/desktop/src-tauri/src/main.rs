@@ -1038,6 +1038,13 @@ async fn update_status() -> Result<UpdateStatus, String> {
 }
 
 #[tauri::command]
+async fn claude_plus_update_status() -> Result<VersionCheck, String> {
+    tauri::async_runtime::spawn_blocking(check_claude_plus_update)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn upgrade_claude_desktop(app: tauri::AppHandle) -> Result<SystemActionResult, String> {
     let worker_app = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -1887,8 +1894,18 @@ fn upgrade_claude_plus_sync(
         None,
         "Checking for a Claude++ update",
     );
-    let status = update_status_sync()?;
-    let check = status.claude_plus.clone();
+    let check = check_claude_plus_update();
+    if check.check_failed {
+        return Ok(UpdateActionResult {
+            ok: false,
+            exit_code: None,
+            message: check.message,
+            stdout: String::new(),
+            stderr: String::new(),
+            downloaded_path: None,
+            status: None,
+        });
+    }
     if !check.update_available {
         return Ok(UpdateActionResult {
             ok: true,
@@ -1897,7 +1914,7 @@ fn upgrade_claude_plus_sync(
             stdout: String::new(),
             stderr: String::new(),
             downloaded_path: None,
-            status: Some(status),
+            status: None,
         });
     }
     let download_url = check
@@ -1943,7 +1960,7 @@ fn upgrade_claude_plus_sync(
         stdout: format!("Downloaded {download_url}"),
         stderr: String::new(),
         downloaded_path: Some(path_string(&download_path)),
-        status: Some(status),
+        status: None,
     })
 }
 
@@ -9271,6 +9288,7 @@ fn main() {
             test_active_provider,
             test_provider,
             uninstall_builtin_skills,
+            claude_plus_update_status,
             update_status,
             upgrade_claude_desktop,
             upgrade_claude_plus

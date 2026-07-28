@@ -62,6 +62,11 @@
       updateFailed: "检查失败",
       updateUnknown: "未检查",
       updateChecking: "正在检查更新...",
+      startupUpdateTitle: "发现 Claude++ 新版本",
+      startupUpdatePrompt: "检测到可用更新，是否立即升级？",
+      startupUpdateNow: "立即升级",
+      startupUpdateLater: "稍后",
+      startupUpdateCheckFailed: "启动版本检查失败，已继续进入 Claude++：{error}",
       updateActionRunning: "正在下载并启动安装器...",
       updateActionOk: "升级操作完成：{message}",
       updateActionFailed: "升级操作失败：{message}",
@@ -582,6 +587,11 @@
       updateFailed: "Check failed",
       updateUnknown: "Not checked",
       updateChecking: "Checking updates...",
+      startupUpdateTitle: "Claude++ update available",
+      startupUpdatePrompt: "A newer version is available. Upgrade now?",
+      startupUpdateNow: "Upgrade Now",
+      startupUpdateLater: "Later",
+      startupUpdateCheckFailed: "Startup update check failed. Claude++ will continue: {error}",
       updateActionRunning: "Downloading and opening installer...",
       updateActionOk: "Update action finished: {message}",
       updateActionFailed: "Update action failed: {message}",
@@ -1329,6 +1339,8 @@
   let updateStatus = null;
   let updateLoading = false;
   let updateActionLoading = false;
+  let startupUpdateChecking = false;
+  let startupClaudePlusCheck = null;
   let launchActionLoading = false;
   let updateProgressUnlisten = null;
   const lastUpdateProgress = new Map();
@@ -1438,6 +1450,42 @@
       return Promise.resolve(undefined);
     }
     return (tauri.core?.invoke ? tauri.core.invoke(command, args) : tauri.invoke(command, args));
+  }
+
+  function showStartupUpdatePrompt(check) {
+    const modal = document.getElementById("startupUpdateModal");
+    if (!modal) return;
+    setText("startupCurrentVersion", check?.current_version || "-");
+    setText("startupLatestVersion", check?.latest_version || "-");
+    modal.hidden = false;
+    modal.querySelector('[data-action="upgradeStartupClaudePlus"]')?.focus();
+  }
+
+  function closeStartupUpdatePrompt() {
+    const modal = document.getElementById("startupUpdateModal");
+    if (modal) modal.hidden = true;
+  }
+
+  async function checkStartupClaudePlusUpdate() {
+    if (startupUpdateChecking) return;
+    startupUpdateChecking = true;
+    try {
+      const check = await invoke("claude_plus_update_status");
+      if (!check) return;
+      startupClaudePlusCheck = check;
+      if (check.update_available && check.current_version && check.latest_version) {
+        showStartupUpdatePrompt(check);
+      } else if (check.check_failed) {
+        log("WARN", t("startupUpdateCheckFailed", { error: check.message || "-" }));
+      }
+    } catch (error) {
+      log("WARN", t("startupUpdateCheckFailed", { error: String(error) }));
+    } finally {
+      startupUpdateChecking = false;
+      if (state && !startupClaudePlusCheck?.update_available && !updateStatus && !updateLoading) {
+        refreshUpdateStatus();
+      }
+    }
   }
 
   function updateProgressPrefix(operation) {
@@ -1656,7 +1704,7 @@
     document.getElementById("bridgeState").textContent = t("bridgeConnected");
     renderState();
     hydrateLazyPage(currentPage());
-    if (!updateStatus && !updateLoading) {
+    if (!updateStatus && !updateLoading && !startupUpdateChecking && !startupClaudePlusCheck?.update_available) {
       refreshUpdateStatus();
     }
     if (!silent) log("OK", t("refreshDone"));
@@ -4294,6 +4342,27 @@
       await refreshUpdateStatus();
       return;
     }
+    if (action === "dismissStartupUpdate") {
+      closeStartupUpdatePrompt();
+      startupClaudePlusCheck = null;
+      if (!updateStatus && !updateLoading) {
+        refreshUpdateStatus();
+      }
+      return;
+    }
+    if (action === "upgradeStartupClaudePlus") {
+      closeStartupUpdatePrompt();
+      if (startupClaudePlusCheck) {
+        updateStatus = {
+          claude_desktop: updateStatus?.claude_desktop || {},
+          claude_plus: startupClaudePlusCheck,
+        };
+      }
+      setPage("system");
+      renderVersionUpdates();
+      await runUpdateCommand("upgrade_claude_plus");
+      return;
+    }
     if (action === "upgradeClaudeDesktop") {
       await runSystemCommand("upgrade_claude_desktop");
       await refreshUpdateStatus();
@@ -4488,5 +4557,6 @@
   document.getElementById("bridgeState").textContent = t("bridgeChecking");
   log("TRACE", "Claude++ Control Tower online");
   setupUpdateProgressListener();
+  checkStartupClaudePlusUpdate();
   refreshState({ silent: true });
 })();

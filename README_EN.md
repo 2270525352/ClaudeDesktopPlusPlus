@@ -74,6 +74,7 @@ After installing `Claude++`:
 - `v0.1.52` adds provider model selection and per-model 1M toggles, makes cc-switch synchronization read-only, adds history state reset, and removes the Windows console window.
 - `v0.1.53` fixes HTTP 403 failures while installing Claude Desktop on macOS by adding system curl, official DMG, and download-page fallbacks.
 - `v0.1.54` fixes the macOS "app is damaged" error caused by the legacy localization patch modifying `Claude.app`; localization now uses runtime injection with signature validation, exact legacy-patch rollback, and official-installer repair.
+- `v0.1.55` prioritizes the Claude++ update check at startup and shows the current and latest versions in an upgrade-now-or-later prompt.
 - `v0.1.50` makes Claude Desktop startup responsive: launch work runs off the UI thread, and current Windows releases use the working 3P configuration path without repeating a known-failing CDP fallback.
 - `v0.1.49` adds live progress bars for Claude Desktop and Claude++ updates, fixes the hidden PowerShell redirect `exit 1`, requests administrator approval when Windows installation needs it, and surfaces detailed failures.
 - `v0.1.48` fixes latest-version redirect parsing, checks for updates automatically at startup, and surfaces update-check failures in the version card.

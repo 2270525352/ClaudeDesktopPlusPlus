@@ -590,6 +590,29 @@
         </section>
       </section>
     </main>
+    <section id="startupUpdateModal" class="modal-backdrop startup-update-backdrop" hidden>
+      <div class="modal-shell startup-update-modal" role="dialog" aria-modal="true" aria-labelledby="startupUpdateTitle">
+        <div class="startup-update-head">
+          <p class="eyebrow">CLAUDE++ UPDATE</p>
+          <h3 id="startupUpdateTitle" data-i18n="startupUpdateTitle">发现 Claude++ 新版本</h3>
+        </div>
+        <p class="startup-update-copy" data-i18n="startupUpdatePrompt">检测到可用更新，是否立即升级？</p>
+        <div class="startup-update-versions">
+          <div>
+            <span data-i18n="currentVersion">当前版本</span>
+            <strong id="startupCurrentVersion">-</strong>
+          </div>
+          <div>
+            <span data-i18n="latestVersion">最新版本</span>
+            <strong id="startupLatestVersion">-</strong>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="text-button primary" type="button" data-action="upgradeStartupClaudePlus" data-i18n="startupUpdateNow">立即升级</button>
+          <button class="text-button" type="button" data-action="dismissStartupUpdate" data-i18n="startupUpdateLater">稍后</button>
+        </div>
+      </div>
+    </section>
     <section id="providerModal" class="modal-backdrop" hidden>
       <div class="modal-shell provider-modal" role="dialog" aria-modal="true" aria-labelledby="providerModalTitle">
         <div class="panel-head">
