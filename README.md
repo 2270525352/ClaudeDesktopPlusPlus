@@ -70,6 +70,7 @@ ClaudeDesktopPlusPlus（Claude++）是面向 Claude Desktop 的第三方桌面�
 - Windows 卸载程序会自动移除 Claude++ 写入的 3P 路由；也可在「API 配置」中手动恢复 Claude 官方配置。
 - 本次兼容性与卸载恢复改动见 [v0.1.44 修复说明](docs/releases/v0.1.44-fixes.md)。
 - `v0.1.45` 的发布内容见 [v0.1.45 发布说明](docs/releases/v0.1.45.md)。
+- `v0.1.46` 已为 macOS ARM64 和 Intel x64 应用加入代码签名及 DMG 内签名校验，修复浏览器下载后提示应用损坏的问题。
 
 ## 开发
 

@@ -62,7 +62,56 @@ jobs:
         if: matrix.platform == 'macos'
         working-directory: apps/desktop
         shell: bash
+        env:
+          # Prevent Gatekeeper from treating unsigned browser downloads as damaged.
+          # A Developer ID identity can override this when certified signing is configured.
+          APPLE_SIGNING_IDENTITY: "-"
         run: npm run tauri -- build --target ${{ matrix.target }}
+
+      - name: Verify macOS app and DMG signatures
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          app_count=0
+          while IFS= read -r -d '' app; do
+            codesign --verify --deep --strict --verbose=2 "$app"
+            codesign --display --verbose=2 "$app"
+            app_count=$((app_count + 1))
+          done < <(find apps/desktop/src-tauri/target -path '*/release/bundle/macos/*.app' -type d -print0)
+          if [ "$app_count" -eq 0 ]; then
+            echo "No macOS app bundle found"
+            exit 1
+          fi
+
+          dmg_count=0
+          while IFS= read -r -d '' dmg; do
+            mount_dir="$(mktemp -d)"
+            hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir"
+            mounted_app_count=0
+            while IFS= read -r -d '' app; do
+              if ! codesign --verify --deep --strict --verbose=2 "$app"; then
+                hdiutil detach "$mount_dir" || true
+                rm -rf "$mount_dir"
+                exit 1
+              fi
+              mounted_app_count=$((mounted_app_count + 1))
+            done < <(find "$mount_dir" -maxdepth 2 -name '*.app' -type d -print0)
+            if [ "$mounted_app_count" -eq 0 ]; then
+              hdiutil detach "$mount_dir"
+              rm -rf "$mount_dir"
+              echo "No app bundle found inside $dmg"
+              exit 1
+            fi
+            hdiutil detach "$mount_dir"
+            rm -rf "$mount_dir"
+            dmg_count=$((dmg_count + 1))
+          done < <(find apps/desktop/src-tauri/target -path '*/release/bundle/dmg/*.dmg' -type f -print0)
+          if [ "$dmg_count" -eq 0 ]; then
+            echo "No macOS DMG found"
+            exit 1
+          fi
 
       - name: Collect artifacts
         shell: bash

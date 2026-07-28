@@ -68,6 +68,7 @@ After installing `Claude++`:
 - Local plugin management uses the official Claude CLI and plugin directory. It is separate from organization-managed plugin delivery.
 - Conversation recovery backs up the target profile first and does not copy sign-in credentials by default.
 - The Windows uninstaller removes 3P routing written by Claude++; the same repair is available from **API Config**.
+- `v0.1.46` adds code signing and DMG signature verification for both macOS ARM64 and Intel x64 builds, fixing the damaged-app warning caused by unsigned downloads.
 
 ## Development
 
