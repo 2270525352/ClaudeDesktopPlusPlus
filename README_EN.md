@@ -71,6 +71,7 @@ After installing `Claude++`:
 
 ### Release history
 
+- `v0.1.60` syncs original model IDs from the selected provider API; Direct mode no longer generates role mappings or falls back to preset models when discovery fails.
 - `v0.1.59` fixes window minimize and close behavior: minimizing keeps Claude++ in the taskbar, closing hides it to the system tray, and only **Exit Claude++** from the tray fully quits the app.
 - `v0.1.58` allows the official plugin marketplace directory to sync directly through Git when Claude CLI is missing or cannot be detected; plugin installation still uses Claude CLI.
 - `v0.1.57` fixes false-positive Claude Desktop launches and localization status on macOS by using LaunchServices, matching the real app process, and separating configured localization from an active runtime injection.

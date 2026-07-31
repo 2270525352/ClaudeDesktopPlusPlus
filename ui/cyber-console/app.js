@@ -303,6 +303,7 @@
       providerTestCode: "错误码",
       providerTestMessage: "错误说明",
       providerTestBody: "响应摘要",
+      providerSyncModels: "同步模型",
       manualProvider: "手动添加",
       editProvider: "编辑配置",
       editingProvider: "编辑 API 配置",
@@ -322,7 +323,7 @@
       discoverModels: "获取模型",
       discoveringModels: "正在根据 URL 和 Key 获取模型...",
       modelDiscoveryStatusIdle: "根据 Base URL 和 API Key 自动获取模型。",
-      modelDiscoveryOk: "已获取 {count} 个模型：{models}",
+      modelDiscoveryOk: "已从当前 API 获取 {count} 个真实模型：{models}",
       modelDiscoveryFailed: "获取模型失败：{error}",
       chooseModels: "选择模型",
       modelPickerTitle: "选择需要的模型",
@@ -842,6 +843,7 @@
       providerTestCode: "Error Code",
       providerTestMessage: "Message",
       providerTestBody: "Body Summary",
+      providerSyncModels: "Sync Models",
       manualProvider: "Manual Add",
       editProvider: "Edit Config",
       editingProvider: "Edit API Config",
@@ -861,7 +863,7 @@
       discoverModels: "Fetch Models",
       discoveringModels: "Fetching models from URL and key...",
       modelDiscoveryStatusIdle: "Fetch models from the Base URL and API key.",
-      modelDiscoveryOk: "Fetched {count} model(s): {models}",
+      modelDiscoveryOk: "Fetched {count} original model ID(s) from this API: {models}",
       modelDiscoveryFailed: "Model discovery failed: {error}",
       chooseModels: "Choose Models",
       modelPickerTitle: "Choose Models",
@@ -3263,7 +3265,7 @@
 
   function applySelectedModelsToMappings() {
     const form = document.getElementById("providerForm");
-    if (formField(form, "protocol").value !== "openai") return;
+    if (formField(form, "protocol").value !== "openai" || !state?.config?.gateway?.enabled) return;
     const selected = selectedProviderModels();
     const routeNames = [
       "claude-opus-4-5",
@@ -3765,6 +3767,16 @@
         await testProvider(provider.id);
       });
 
+      const syncModelsAction = document.createElement("button");
+      syncModelsAction.className = "text-button";
+      syncModelsAction.type = "button";
+      syncModelsAction.textContent = t("providerSyncModels");
+      syncModelsAction.disabled = !provider.base_url;
+      syncModelsAction.addEventListener("click", async () => {
+        loadProviderIntoForm(provider);
+        await discoverProviderModels();
+      });
+
       const deleteAction = document.createElement("button");
       deleteAction.className = "text-button danger";
       deleteAction.type = "button";
@@ -3781,7 +3793,7 @@
         });
       });
 
-      actions.append(selectAction, launchAction, testAction, editAction, deleteAction);
+      actions.append(selectAction, launchAction, testAction, syncModelsAction, editAction, deleteAction);
       item.append(details, actions);
       list.appendChild(item);
     });
@@ -3968,6 +3980,9 @@
         })
         .filter(Boolean);
       discoveredModelMappings = (result.model_mappings || []).map((mapping) => ({ ...mapping }));
+      if (!state?.config?.gateway?.enabled) {
+        renderMappingRows([]);
+      }
       applySelectedModelsToMappings();
       syncMappingVisibility();
       renderModelSelectionSummary();

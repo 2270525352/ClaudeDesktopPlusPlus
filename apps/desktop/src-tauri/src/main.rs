@@ -2500,36 +2500,15 @@ fn discover_provider_models(provider: ProviderInput) -> Result<ModelDiscoveryRes
     }
     let mut models = discover_provider_model_ids(base_url, &api_key)?;
     models = prioritize_model_ids(models);
-    let model_mappings = if protocol == PROVIDER_PROTOCOL_OPENAI {
-        openai_route_models_from_ids(models.clone())
-            .into_iter()
-            .map(|route| ModelMapping {
-                claude_route: route.claude_route,
-                target_model: route.target_model,
-                label: route.label,
-                enabled: true,
-                supports_1m: false,
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let message = if protocol == PROVIDER_PROTOCOL_OPENAI {
-        format!(
-            "Discovered {} OpenAI/Codex model(s); generated Claude route mappings.",
-            models.len()
-        )
-    } else {
-        format!(
-            "Discovered {} Anthropic-compatible model(s); direct model discovery can be used.",
-            models.len()
-        )
-    };
+    let message = format!(
+        "Discovered {} model(s) from the selected provider. Original upstream model IDs were preserved.",
+        models.len()
+    );
     Ok(ModelDiscoveryResult {
         protocol,
         model_count: models.len(),
         models,
-        model_mappings,
+        model_mappings: Vec::new(),
         message,
     })
 }
@@ -4956,7 +4935,8 @@ fn build_claude_3p_provider_json(
     } else {
         api_key.clone()
     };
-    let inference_models = build_provider_inference_model_entries(provider, &api_key);
+    let inference_models =
+        build_provider_inference_model_entries(provider, &api_key, uses_local_gateway)?;
     let mut gateway = json!({
         "inferenceProvider": "gateway",
         "inferenceGatewayBaseUrl": provider_base_url,
@@ -4988,9 +4968,13 @@ fn claude_3p_config_note(uses_local_gateway: bool) -> &'static str {
     }
 }
 
-fn build_provider_inference_model_entries(provider: &ApiProvider, api_key: &str) -> Vec<Value> {
-    if provider_requires_gateway_adapter(provider) {
-        return build_openai_route_inference_model_entries(provider, api_key);
+fn build_provider_inference_model_entries(
+    provider: &ApiProvider,
+    api_key: &str,
+    uses_local_gateway: bool,
+) -> Result<Vec<Value>, String> {
+    if uses_local_gateway && provider_requires_gateway_adapter(provider) {
+        return Ok(build_openai_route_inference_model_entries(provider, api_key));
     }
     build_anthropic_inference_model_entries(provider, api_key)
 }
@@ -5008,7 +4992,10 @@ fn build_openai_route_inference_model_entries(provider: &ApiProvider, api_key: &
         .collect()
 }
 
-fn build_anthropic_inference_model_entries(provider: &ApiProvider, api_key: &str) -> Vec<Value> {
+fn build_anthropic_inference_model_entries(
+    provider: &ApiProvider,
+    api_key: &str,
+) -> Result<Vec<Value>, String> {
     let configured = provider
         .selected_models
         .iter()
@@ -5023,12 +5010,11 @@ fn build_anthropic_inference_model_entries(provider: &ApiProvider, api_key: &str
         })
         .collect::<Vec<_>>();
     if !configured.is_empty() {
-        return configured;
+        return Ok(configured);
     }
 
-    let model_ids = discover_provider_model_ids(&provider.base_url, api_key)
-        .unwrap_or_else(|_| default_anthropic_model_ids());
-    dedupe_model_ids(model_ids)
+    let model_ids = discover_provider_model_ids(&provider.base_url, api_key)?;
+    Ok(dedupe_model_ids(model_ids)
         .into_iter()
         .map(|model_id| {
             let label = model_label(&model_id);
@@ -5038,18 +5024,7 @@ fn build_anthropic_inference_model_entries(provider: &ApiProvider, api_key: &str
                 "supports1m": false,
             })
         })
-        .collect()
-}
-
-fn default_anthropic_model_ids() -> Vec<String> {
-    vec![
-        "claude-3-5-haiku-20241022".to_string(),
-        "claude-3-5-sonnet-20241022".to_string(),
-        "claude-3-7-sonnet-20250219".to_string(),
-        "claude-haiku-4-5-20251001".to_string(),
-        "claude-opus-4-20250514".to_string(),
-        "claude-opus-4-1-20250805".to_string(),
-    ]
+        .collect())
 }
 
 fn dedupe_model_ids(model_ids: Vec<String>) -> Vec<String> {
@@ -10327,11 +10302,50 @@ mod tests {
             },
         ];
 
-        let models = build_anthropic_inference_model_entries(&provider, "test-key");
+        let models = build_anthropic_inference_model_entries(&provider, "test-key").unwrap();
 
         assert_eq!(models.len(), 1);
         assert_eq!(models[0]["name"], "claude-opus-4-8");
         assert_eq!(models[0]["supports1m"], true);
+    }
+
+    #[test]
+    fn direct_openai_provider_preserves_selected_upstream_model_ids() {
+        let mut provider = test_provider("direct-openai", "manual");
+        provider.protocol = PROVIDER_PROTOCOL_OPENAI.to_string();
+        provider.selected_models = vec![ProviderModel {
+            id: "vendor/codex-model-2026-07".to_string(),
+            label: "Codex Model".to_string(),
+            enabled: true,
+            supports_1m: false,
+        }];
+
+        let models =
+            build_provider_inference_model_entries(&provider, "test-key", false).unwrap();
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0]["name"], "vendor/codex-model-2026-07");
+    }
+
+    #[test]
+    fn direct_claude_3p_config_exposes_only_selected_upstream_model_ids() {
+        let mut provider = test_provider("direct-config", "manual");
+        provider.protocol = PROVIDER_PROTOCOL_OPENAI.to_string();
+        provider.selected_models = vec![ProviderModel {
+            id: "upstream/model-exact-id".to_string(),
+            label: "Exact Upstream Model".to_string(),
+            enabled: true,
+            supports_1m: true,
+        }];
+        let mut config = AppConfig::default();
+        config.active_provider_id = Some(provider.id.clone());
+        config.providers.push(provider.clone());
+
+        let output = build_claude_3p_provider_json(&config, &provider).unwrap();
+
+        assert_eq!(output["inferenceGatewayBaseUrl"], provider.base_url);
+        assert_eq!(output["inferenceModels"][0]["name"], "upstream/model-exact-id");
+        assert_eq!(output["inferenceModels"][0]["supports1m"], true);
     }
 
     #[test]
